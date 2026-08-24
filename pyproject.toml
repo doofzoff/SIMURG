@@ -31,4 +31,4 @@ Repository = "https://github.com/doofzoff/SIMURG"
 where = ["src"]
 
 [tool.setuptools.package-data]
-simurg = ["weights/*.json", "training/train_ui/*.html"]
+simurg = ["weights/*.json", "training/train_ui/*.html", "guard_ui/*.html"]
