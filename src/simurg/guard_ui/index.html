@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<!-- ═══════════════════════════════════════════════════════════════════════════
+  SIMURG · Streaming Integrity Monitor & Universal Regeneration Guard
+
+  Developed by doofZ (a.k.a Farid Aghayev from HAL-X AI)
+  Co-Founder & Head of AI at HAL-X AI.
+
+  guard_ui/index.html — the live guard dashboard. Connects to any
+  OpenAI-compatible endpoint through the local guard_dashboard server, streams
+  the answer through Simurg and renders in real time: the released text, the
+  fused corruption score with calibrated thresholds and the hold zone, the
+  corruption onset marker, and all 15 stream features as sparklines. Pasted
+  texts can be analyzed at full speed. Fully self-contained (inline CSS/JS,
+  no external requests).
+═══════════════════════════════════════════════════════════════════════════ -->
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>SIMURG · Live Guard</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --card:#161615; --line:#2c2c2a;
+    --ink:#ffffff; --muted:#c3c2b7; --dim:#7a7970;
+    --blue:#3987e5; --magenta:#d55181; --aqua:#199e70; --violet:#9085e9;
+    --yellow:#c98500; --red:#e66767; --green:#008300; --brand:#E72166;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font:14px/1.45 "Segoe UI",system-ui,sans-serif;padding:22px}
+  .wrap{max-width:1280px;margin:0 auto}
+  header{display:flex;align-items:center;gap:14px;margin-bottom:18px;flex-wrap:wrap}
+  .logo{font-weight:800;font-size:22px;letter-spacing:.5px}
+  .logo b{color:var(--brand)}
+  .pill{padding:4px 12px;border-radius:999px;font-size:12px;font-weight:700;
+        background:#2a2a28;color:var(--muted);text-transform:uppercase;letter-spacing:.8px}
+  .pill.holding{background:rgba(57,135,229,.18);color:var(--blue)}
+  .pill.live{background:rgba(25,158,112,.18);color:#7fd6b2}
+  .pill.suspect{background:rgba(201,133,0,.2);color:#e8b25c}
+  .pill.corrupt{background:rgba(230,103,103,.2);color:var(--red)}
+  .pill.clean{background:rgba(0,131,0,.22);color:#7fce7f}
+  .meta{margin-left:auto;color:var(--dim);font-size:12px;text-align:right}
+  .cols{display:grid;grid-template-columns:340px 1fr;gap:16px}
+  @media(max-width:980px){.cols{grid-template-columns:1fr}}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .card h3{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
+           color:var(--muted);margin-bottom:10px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  label{display:block;font-size:11px;color:var(--dim);text-transform:uppercase;
+        letter-spacing:.6px;margin:8px 0 3px}
+  input,textarea,select{width:100%;background:#0f0f0e;border:1px solid var(--line);border-radius:8px;
+        color:var(--ink);padding:8px 10px;font:13px/1.4 "Segoe UI",system-ui,sans-serif;outline:none}
+  input:focus,textarea:focus{border-color:#3a3a38}
+  textarea{resize:vertical;min-height:56px}
+  button{margin-top:10px;width:100%;padding:10px;border:0;border-radius:9px;cursor:pointer;
+         font:700 13px "Segoe UI",system-ui,sans-serif;background:var(--brand);color:#fff;letter-spacing:.3px}
+  button.ghost{background:#242422;color:var(--muted)}
+  button:disabled{opacity:.45;cursor:default}
+  .banner{display:none;margin-bottom:12px;padding:12px 14px;border-radius:10px;font-size:13px}
+  .banner.corrupt{display:block;background:rgba(230,103,103,.12);border:1px solid rgba(230,103,103,.4)}
+  .banner.clean{display:block;background:rgba(0,131,0,.12);border:1px solid rgba(0,131,0,.4);color:#8fdc8f}
+  .banner.suspect{display:block;background:rgba(201,133,0,.12);border:1px solid rgba(201,133,0,.4);color:#e8b25c}
+  .banner.error{display:block;background:rgba(230,103,103,.12);border:1px solid rgba(230,103,103,.4);color:var(--red)}
+  .banner b{display:block;margin-bottom:4px;font-size:12px;text-transform:uppercase;letter-spacing:.8px}
+  .banner ul{margin:4px 0 0 16px;color:var(--muted)}
+  .stream{background:#0f0f0e;border:1px solid var(--line);border-radius:10px;padding:12px;
+          font:12.5px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;
+          word-break:break-word;max-height:240px;overflow-y:auto;min-height:84px}
+  .stream .held{color:var(--dim)}
+  .chips{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}
+  .chip{font-size:11px;color:var(--muted);background:#1d1d1b;border-radius:999px;padding:3px 10px}
+  .chip.warn{color:#e8b25c;background:rgba(201,133,0,.14)}
+  .chip.bad{color:var(--red);background:rgba(230,103,103,.14)}
+  svg text{font:10.5px "Segoe UI",system-ui,sans-serif;fill:var(--dim)}
+  .fgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
+  @media(max-width:1200px){.fgrid{grid-template-columns:repeat(3,1fr)}}
+  .fcell{background:#1d1d1b;border-radius:8px;padding:6px 8px}
+  .fcell .fn{font-size:10.5px;color:var(--muted);display:flex;justify-content:space-between;gap:6px}
+  .fcell .fv{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums}
+  footer{margin-top:20px;color:var(--dim);font-size:11px}
+</style>
+</head>
+<body><div class="wrap">
+  <header>
+    <div class="logo">SIMURG <b>·</b> Live Guard</div>
+    <span id="pill" class="pill">idle</span>
+    <div class="meta">
+      <div id="meta1">endpoint: –</div>
+      <div><span id="chars">0</span> chars · <span id="elapsed">0s</span> · <span id="rate">0</span> chars/s</div>
+    </div>
+  </header>
+
+  <div class="cols">
+    <div>
+      <div class="card">
+        <h3>Guard a live endpoint</h3>
+        <label>endpoint (openai-compatible base url)</label>
+        <input id="url" value="http://localhost:8000/v1" spellcheck="false"/>
+        <label>model</label>
+        <input id="model" value="my-model" spellcheck="false"/>
+        <div class="row">
+          <div><label>api key</label><input id="key" type="password" value="EMPTY" spellcheck="false"/></div>
+          <div><label>max tokens</label><input id="maxtok" type="number" value="512"/></div>
+        </div>
+        <div class="row">
+          <div><label>temperature</label><input id="temp" type="number" step="0.1" value="0.7"/></div>
+          <div><label>timeout (s)</label><input id="timeout" type="number" value="120"/></div>
+        </div>
+        <label>user prompt</label>
+        <textarea id="prompt" rows="3">Explain how oil prices affect a small economy.</textarea>
+        <details style="margin-top:8px"><summary style="font-size:11px;color:var(--dim);cursor:pointer">system prompt</summary>
+          <textarea id="system" rows="2" style="margin-top:6px">You are a helpful assistant.</textarea></details>
+        <button id="btnGo">guard stream</button>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h3>Analyze a pasted stream</h3>
+        <textarea id="paste" rows="4" placeholder="paste a finished answer to run it through the sentinel…"></textarea>
+        <button id="btnPaste" class="ghost">analyze pasted text</button>
+      </div>
+      <footer>runs through the local guard_dashboard server · zero new dependencies</footer>
+    </div>
+
+    <div>
+      <div class="card">
+        <div id="banner" class="banner"></div>
+        <h3>Stream · released text only</h3>
+        <div id="stream" class="stream"><span class="held">waiting for a stream…</span></div>
+        <div id="chips" class="chips"></div>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h3>Fused corruption score <span style="color:var(--dim);text-transform:none">· thresholds from conformal calibration, shaded zone is the 350-char hold buffer</span></h3>
+        <svg id="score" width="100%" height="180" viewBox="0 0 860 180" preserveAspectRatio="none"></svg>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h3>Stream features <span style="color:var(--dim);text-transform:none">· 15 incremental signals, sampled at every 400-char checkpoint</span></h3>
+        <div id="fgrid" class="fgrid"></div>
+      </div>
+    </div>
+  </div>
+  <footer>SIMURG · Streaming Integrity Monitor &amp; Universal Regeneration Guard · developed by doofZ (Farid Aghayev) · HAL-X AI</footer>
+</div>
+<script>
+const $ = id => document.getElementById(id);
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const C = {blue:css('--blue'), aqua:css('--aqua'), yellow:css('--yellow'), red:css('--red'),
+           dim:css('--dim'), line:css('--line'), ink:css('--ink')};
+
+let frames = [];          // {chars, p, state, onset, features}
+let releasedText = "";
+let onsetChar = null;
+let hold = 350, checkEvery = 400;
+let runStart = null, running = false;
+let dirty = false;
+
+const featCells = {};
+function buildFeatureGrid(names){
+  const g = $('fgrid'); g.innerHTML = '';
+  for(const n of names){
+    const d = document.createElement('div');
+    d.className = 'fcell';
+    d.innerHTML = `<div class="fn"><span>${n}</span><span class="fv">–</span></div>
+                   <svg width="100%" height="34" viewBox="0 0 120 34" preserveAspectRatio="none"></svg>`;
+    g.appendChild(d);
+    featCells[n] = {svg:d.querySelector('svg'), val:d.querySelector('.fv'), pts:[]};
+  }
+}
+buildFeatureGrid(["digit_frac","foreign_frac","repeat_rate","zlib_ratio","ttr","script_switch_rate",
+  "structural_density","symbol_frac","max_char_run","space_frac","surprise_z","surprise_low_frac",
+  "simhash_drift","entropy","max_shingle_count"]);
+
+function setPill(state){
+  const p = $('pill');
+  const map = {idle:'idle', holding:'holding', live:'live', suspect:'suspect',
+               corrupt:'corrupt', clean:'clean', error:'corrupt'};
+  p.className = 'pill ' + (map[state] || '');
+  p.textContent = state;
+}
+function setBanner(state, reasons, extra){
+  const b = $('banner');
+  if(!state){ b.className = 'banner'; return; }
+  b.className = 'banner ' + state;
+  let html = `<b>${state === 'corrupt' ? '✖ corrupt · aborted' :
+                    state === 'clean' ? '✔ clean' :
+                    state === 'suspect' ? '▲ suspect · watch' : state}</b>`;
+  if(extra) html += `<div>${extra}</div>`;
+  if(reasons && reasons.length)
+    html += `<ul>${reasons.map(r => `<li>${r}</li>`).join('')}</ul>`;
+  b.innerHTML = html;
+}
+function setChips(o){
+  const c = $('chips');
+  const items = [];
+  if(o.chars) items.push(`<span class="chip">${o.chars} chars generated</span>`);
+  if(o.released_chars != null) items.push(`<span class="chip">${o.released_chars} released</span>`);
+  if(o.blocked_chars) items.push(`<span class="chip bad">${o.blocked_chars} chars blocked after onset</span>`);
+  if(o.onset != null) items.push(`<span class="chip warn">onset @ char ${o.onset}</span>`);
+  c.innerHTML = items.join('');
+}
+
+function drawScore(){
+  const svg = $('score');
+  const W = 860, H = 180, P = 34;
+  const maxChars = Math.max(800, ...frames.map(f => f.chars)) * 1.05;
+  let out = `<rect x="${P}" y="0" width="${hold / maxChars * (W - P - 10)}" height="${H - 22}" fill="rgba(57,135,229,.07)"/>`;
+  out += `<line x1="${P}" y1="${H - 20}" x2="${W - 8}" y2="${H - 20}" stroke="${C.line}"/>`;
+  out += `<line x1="${P}" y1="${H - 20 - 0.5 * (H - 34)}" x2="${W - 8}" y2="${H - 20 - 0.5 * (H - 34)}" stroke="${C.yellow}" stroke-dasharray="4 4" opacity=".55"/>`;
+  out += `<line x1="${P}" y1="${H - 20 - 0.7 * (H - 34)}" x2="${W - 8}" y2="${H - 20 - 0.7 * (H - 34)}" stroke="${C.red}" stroke-dasharray="4 4" opacity=".7"/>`;
+  out += `<text x="${W - 10}" y="${H - 24 - 0.5 * (H - 34)}" text-anchor="end">suspect 0.5</text>`;
+  out += `<text x="${W - 10}" y="${H - 24 - 0.7 * (H - 34)}" text-anchor="end" fill="${C.red}">abort 0.7</text>`;
+  out += `<text x="${P}" y="12">1.0</text><text x="${P}" y="${H - 24}">0.0</text>`;
+  const x = ch => P + (W - P - 10) * ch / maxChars;
+  const y = p => H - 20 - p * (H - 34);
+  if(frames.length > 1){
+    const pts = frames.map(f => `${x(f.chars).toFixed(1)},${y(f.p).toFixed(1)}`).join(' ');
+    out += `<polyline points="${pts}" fill="none" stroke="${C.blue}" stroke-width="2.2" stroke-linejoin="round"/>`;
+    const last = frames[frames.length - 1];
+    out += `<circle cx="${x(last.chars)}" cy="${y(last.p)}" r="4" fill="${last.p >= 0.7 ? C.red : C.blue}"/>`;
+  }
+  if(onsetChar != null)
+    out += `<line x1="${x(onsetChar)}" y1="14" x2="${x(onsetChar)}" y2="${H - 20}" stroke="${C.ink}" stroke-dasharray="2 3"/>
+            <text x="${x(onsetChar) + 5}" y="24" fill="${C.ink}">onset</text>`;
+  svg.innerHTML = out;
+}
+function drawFeatures(){
+  for(const [name, cell] of Object.entries(featCells)){
+    if(!cell.pts.length){ cell.svg.innerHTML = ''; continue; }
+    const W = 120, H = 34, P = 4;
+    const vals = cell.pts.map(p => p.v);
+    const mn = Math.min(...vals), mx = Math.max(...vals);
+    const span = (mx - mn) || 1;
+    const x = i => P + (W - 2 * P) * (i / Math.max(1, cell.pts.length - 1));
+    const y = v => H - 4 - (v - mn) / span * (H - 10);
+    const pts = cell.pts.map((p, i) => `${x(i).toFixed(1)},${y(p.v).toFixed(1)}`).join(' ');
+    const last = vals[vals.length - 1];
+    cell.svg.innerHTML = `<polyline points="${pts}" fill="none" stroke="${C.violet}" stroke-width="1.6"/>
+                          <circle cx="${x(cell.pts.length - 1)}" cy="${y(last)}" r="2.5" fill="${C.violet}"/>`;
+    cell.val.textContent = last.toFixed(3);
+  }
+}
+function scheduleDraw(){
+  if(dirty) return;
+  dirty = true;
+  requestAnimationFrame(() => { dirty = false; drawScore(); drawFeatures(); });
+}
+function onToken(d){
+  if(d.released){
+    releasedText += d.released;
+    const s = $('stream');
+    s.textContent = releasedText;
+    s.scrollTop = s.scrollHeight;
+  }
+  if(d.p > 0 || (d.state && d.state !== 'live')){
+    frames.push({chars: d.chars, p: d.p, state: d.state, features: d.features});
+    if(d.onset != null) onsetChar = d.onset;
+    if(d.features)
+      for(const [k, v] of Object.entries(d.features))
+        if(featCells[k]) featCells[k].pts.push({v});
+  }
+  setPill(d.state === 'corrupt' ? 'corrupt' : d.state === 'suspect' ? 'suspect' :
+          d.chars < hold ? 'holding' : 'live');
+  $('chars').textContent = d.chars;
+  if(d.chars < hold) setBanner(null);
+  scheduleDraw();
+}
+function onFinal(d){
+  running = false;
+  $('btnGo').disabled = $('btnPaste').disabled = false;
+  $('chars').textContent = d.chars;
+  setChips(d);
+  if(d.state === 'corrupt')
+    setBanner('corrupt', d.reasons, `aborted at char ${d.chars} · released ${d.released_chars} · ` +
+      `the host should replace the shown text with the next attempt's output`);
+  else if(d.state === 'suspect')
+    setBanner('suspect', d.reasons, `stream finished above the suspect threshold but under the abort threshold`);
+  else if(d.state === 'clean')
+    setBanner('clean', null, `${d.chars} chars, ${d.elapsed != null ? d.elapsed + ' ms upstream' : 'no alarms'}`);
+  else setBanner('error', d.reasons || null);
+  setPill(d.state);
+  scheduleDraw();
+}
+
+async function runSse(url, body){
+  const resp = await fetch(url, {method:'POST',
+    headers:{'Content-Type':'application/json'}, body: JSON.stringify(body)});
+  if(!resp.ok) throw new Error('server: ' + (await resp.text()).slice(0, 300));
+  const reader = resp.body.getReader();
+  const dec = new TextDecoder();
+  let buf = '';
+  while(true){
+    const {done, value} = await reader.read();
+    if(done) break;
+    buf += dec.decode(value, {stream: true});
+    let i;
+    while((i = buf.indexOf('\n\n')) >= 0){
+      const raw = buf.slice(0, i); buf = buf.slice(i + 2);
+      let ev = 'message', data = '';
+      for(const ln of raw.split('\n')){
+        if(ln.startsWith('event: ')) ev = ln.slice(7);
+        else if(ln.startsWith('data: ')) data = ln.slice(6);
+      }
+      if(!data) continue;
+      const d = JSON.parse(data);
+      if(ev === 'start'){
+        hold = d.hold; checkEvery = d.check_every;
+        $('meta1').textContent = 'endpoint: ' + (d.model || '');
+      }
+      else if(ev === 'token') onToken(d);
+      else if(ev === 'final') onFinal(d);
+      else if(ev === 'error') setBanner('error', [d.message]);
+    }
+  }
+}
+function reset(){
+  frames = []; releasedText = ''; onsetChar = null;
+  for(const c of Object.values(featCells)) c.pts = [];
+  const s = $('stream');
+  s.innerHTML = '<span class="held">streaming…</span>';
+  setBanner(null); setChips({}); setPill('holding');
+  $('chars').textContent = '0';
+  drawScore(); drawFeatures();
+}
+function begin(){
+  running = true; runStart = performance.now();
+  $('btnGo').disabled = $('btnPaste').disabled = true;
+  reset();
+}
+setInterval(() => {
+  if(!running || !runStart) return;
+  const el = (performance.now() - runStart) / 1000;
+  $('elapsed').textContent = el.toFixed(1) + 's';
+  $('rate').textContent = el > 0 ? Math.round(frames.reduce((m, f) => Math.max(m, f.chars), 0) / el) : 0;
+}, 250);
+
+$('btnGo').onclick = async () => {
+  begin();
+  const sys = $('system').value.trim();
+  const msgs = (sys ? [{role:'system', content: sys}] : [])
+    .concat([{role:'user', content: $('prompt').value}]);
+  try{
+    await runSse('/api/generate', {
+      url: $('url').value, model: $('model').value, api_key: $('key').value,
+      messages: msgs, max_tokens: +$('maxtok').value,
+      temperature: +$('temp').value, timeout: +$('timeout').value});
+  }catch(e){ setBanner('error', [e.message]); running = false;
+             $('btnGo').disabled = $('btnPaste').disabled = false; }
+};
+$('btnPaste').onclick = async () => {
+  const text = $('paste').value;
+  if(!text.trim()) return;
+  begin();
+  try{ await runSse('/api/analyze', {text}); }
+  catch(e){ setBanner('error', [e.message]); running = false;
+            $('btnGo').disabled = $('btnPaste').disabled = false; }
+};
+drawScore();
+</script>
+</body></html>
