@@ -1,0 +1,34 @@
+# ═══════════════════════════════════════════════════════════════════════════════
+# SIMURG · Streaming Integrity Monitor & Universal Regeneration Guard
+#
+# Developed by doofZ (a.k.a Farid Aghayev from HAL-X AI)
+# Co-Founder & Head of AI at HAL-X AI.
+# ═══════════════════════════════════════════════════════════════════════════════
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "simurg-guard"
+version = "1.0.0"
+description = "Zero-leak online detection of LLM decoding corruption in production streams"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [{ name = "Farid Aghayev (doofZ)", email = "farid.a@hal-x.ai" }]
+keywords = ["llm", "llm-safety", "guardrails", "streaming", "hallucination",
+            "anomaly-detection", "inference", "vllm", "openai-api", "online-learning"]
+requires-python = ">=3.10"
+dependencies = ["numpy>=1.24"]
+
+[project.optional-dependencies]
+figures = ["matplotlib>=3.7"]
+
+[project.urls]
+Homepage = "https://hal-x.ai"
+Repository = "https://github.com/doofzoff/SIMURG"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+simurg = ["weights/*.json", "training/train_ui/*.html"]

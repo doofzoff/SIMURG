@@ -1,0 +1,14 @@
+cff-version: 1.2.0
+message: "If you use SIMURG in your research, please cite it as below."
+title: "SIMURG: Zero-Leak Online Detection of LLM Decoding Corruption in Production Streams"
+authors:
+  - family-names: "Aghayev"
+    given-names: "Farid"
+    email: "farid.a@hal-x.ai"
+    affiliation: "HAL-X AI"
+type: software
+license: Apache-2.0
+url: "https://hal-x.ai"
+repository-code: "https://github.com/doofzoff/SIMURG"
+date-released: "2026-07-18"
+version: "1.0.0"

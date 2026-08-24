@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<!-- ═══════════════════════════════════════════════════════════════════════════
+  SIMURG · Streaming Integrity Monitor & Universal Regeneration Guard
+
+  Developed by doofZ (a.k.a Farid Aghayev from HAL-X AI)
+  Co-Founder & Head of AI at HAL-X AI.
+
+  train_ui/index.html — the live training dashboard. Polls metrics.json (written
+  atomically by simurg/train_live.py) every 600 ms and renders: phase progress,
+  train/test log-loss, accuracy + AUROC, the 15 model weights evolving in real
+  time, process memory, and the final stream-level TPR/FPR verdict. Fully
+  self-contained (inline CSS/JS, no external requests).
+════════════════════════════════════════════════════════════════════════════ -->
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1"/>
+<title>SIMURG · Live Training</title>
+<style>
+  :root{
+    --bg:#0a0a0a; --card:#161615; --line:#2c2c2a;
+    --ink:#ffffff; --muted:#c3c2b7; --dim:#7a7970;
+    --blue:#3987e5; --magenta:#d55181; --aqua:#199e70; --violet:#9085e9;
+    --yellow:#c98500; --red:#e66767; --green:#008300; --brand:#E72166;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  body{background:var(--bg);color:var(--ink);font:14px/1.45 "Segoe UI",system-ui,sans-serif;padding:26px}
+  .wrap{max-width:1180px;margin:0 auto}
+  header{display:flex;align-items:center;gap:14px;margin-bottom:20px;flex-wrap:wrap}
+  .logo{font-weight:800;font-size:22px;letter-spacing:.5px}
+  .logo b{color:var(--brand)}
+  .pill{padding:4px 12px;border-radius:999px;font-size:12px;font-weight:700;
+        background:#2a2a28;color:var(--muted);text-transform:uppercase;letter-spacing:.8px}
+  .pill.run{background:rgba(57,135,229,.18);color:var(--blue)}
+  .pill.done{background:rgba(0,131,0,.22);color:#7fce7f}
+  .meta{margin-left:auto;color:var(--dim);font-size:12px;text-align:right}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px}
+  .card h3{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.8px;
+           color:var(--muted);margin-bottom:10px}
+  .full{grid-column:1/-1}
+  .prog{height:8px;background:#242422;border-radius:99px;overflow:hidden;margin-top:6px}
+  .prog>i{display:block;height:100%;background:var(--blue);border-radius:99px;transition:width .4s}
+  .phrow{display:flex;justify-content:space-between;color:var(--dim);font-size:12px;margin-top:4px}
+  .tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
+  .tile{background:#1d1d1b;border-radius:10px;padding:10px 12px}
+  .tile .v{font-size:22px;font-weight:800}
+  .tile .l{font-size:11px;color:var(--dim);text-transform:uppercase;letter-spacing:.6px}
+  svg text{font:11px "Segoe UI",system-ui,sans-serif;fill:var(--dim)}
+  .legend{display:flex;gap:14px;font-size:12px;color:var(--muted);margin-bottom:6px}
+  .legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px}
+  .wrow{display:flex;align-items:center;gap:8px;margin:3px 0}
+  .wname{width:150px;font-size:11.5px;color:var(--muted);text-align:right;flex-shrink:0}
+  .wbar{flex:1;height:14px;position:relative;background:#1d1d1b;border-radius:4px;overflow:hidden}
+  .wbar>i{position:absolute;top:1px;bottom:1px;border-radius:3px;transition:left .3s,width .3s}
+  .wval{width:52px;font-size:11.5px;font-variant-numeric:tabular-nums}
+  .verdict{display:none;margin-top:14px;padding:14px;border-radius:12px;font-weight:700;
+           background:rgba(0,131,0,.15);border:1px solid rgba(0,131,0,.4);color:#8fdc8f}
+  footer{margin-top:22px;color:var(--dim);font-size:11px}
+</style>
+</head>
+<body><div class="wrap">
+  <header>
+    <div class="logo">SIMURG <b>·</b> Live Training</div>
+    <span id="phase" class="pill">connecting…</span>
+    <div class="meta">
+      <div id="ds">–</div>
+      <div><span id="elapsed">0s</span> · RAM <span id="mem">–</span> MB · SGD updates <span id="upd">0</span></div>
+    </div>
+  </header>
+
+  <div class="card full" id="progcard">
+    <h3 id="progtitle">Progress</h3>
+    <div class="prog"><i id="progbar" style="width:0%"></i></div>
+    <div class="phrow"><span id="progtext">waiting for trainer…</span><span id="progpct"></span></div>
+  </div>
+
+  <div style="height:16px"></div>
+  <div class="grid">
+    <div class="card">
+      <h3>Log-loss (cross-entropy)</h3>
+      <div class="legend"><span><i style="background:var(--blue)"></i>train</span>
+        <span><i style="background:var(--magenta)"></i>test</span></div>
+      <svg id="loss" width="100%" height="190" viewBox="0 0 540 190" preserveAspectRatio="none"></svg>
+    </div>
+    <div class="card">
+      <h3>Accuracy &amp; AUROC (test)</h3>
+      <div class="legend"><span><i style="background:var(--aqua)"></i>accuracy</span>
+        <span><i style="background:var(--violet)"></i>AUROC</span></div>
+      <svg id="acc" width="100%" height="190" viewBox="0 0 540 190" preserveAspectRatio="none"></svg>
+    </div>
+    <div class="card full">
+      <h3>Model weights — evolving in real time <span style="color:var(--dim);text-transform:none">(blue = pushes toward «corrupt», red = toward «clean»)</span></h3>
+      <div id="weights"></div>
+    </div>
+    <div class="card">
+      <h3>Process memory (RSS, MB)</h3>
+      <svg id="memsvg" width="100%" height="120" viewBox="0 0 540 120" preserveAspectRatio="none"></svg>
+    </div>
+    <div class="card">
+      <h3>Held-out stream evaluation</h3>
+      <div class="tiles">
+        <div class="tile"><div class="v" id="tpr">–</div><div class="l">TPR</div></div>
+        <div class="tile"><div class="v" id="fpr">–</div><div class="l">FPR</div></div>
+        <div class="tile"><div class="v" id="auroc">–</div><div class="l">AUROC</div></div>
+        <div class="tile"><div class="v" id="tau">–</div><div class="l">conformal τ</div></div>
+      </div>
+      <div id="verdict" class="verdict"></div>
+    </div>
+  </div>
+  <footer>SIMURG · CorruptBench-HF · developed by doofZ (Farid Aghayev) — HAL-X AI</footer>
+</div>
+<script>
+const css = v => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const memHist = [];
+function line(svg, series, ymin, ymax, colors){
+  const W=540,H=+svg.getAttribute('height'),P=26;
+  let out = `<line x1="${P}" y1="${H-18}" x2="${W-6}" y2="${H-18}" stroke="#2c2c2a"/>`;
+  const n = Math.max(...series.map(s=>s.length));
+  if(n>1){
+    series.forEach((s,si)=>{
+      const pts = s.map((v,i)=>{
+        const x = P+(W-P-10)*(i/(n-1));
+        const y = (H-22)-((v-ymin)/(ymax-ymin||1))*(H-34);
+        return `${x.toFixed(1)},${y.toFixed(1)}`}).join(' ');
+      out += `<polyline points="${pts}" fill="none" stroke="${colors[si]}" stroke-width="2.2" stroke-linejoin="round"/>`;
+      const last=s[s.length-1];
+      const ly=(H-22)-((last-ymin)/(ymax-ymin||1))*(H-34);
+      out += `<text x="${W-8}" y="${Math.max(12,ly-5).toFixed(1)}" text-anchor="end" fill="${colors[si]}">${(+last).toFixed(3)}</text>`;
+    });
+  }
+  out += `<text x="${P}" y="12">${ymax.toFixed(2)}</text><text x="${P}" y="${H-24}">${ymin.toFixed(2)}</text>`;
+  svg.innerHTML = out;
+}
+function weights(div, names, w){
+  const maxAbs = Math.max(0.5, ...names.map(n=>Math.abs(w[n]||0)));
+  div.innerHTML = names.map(n=>{
+    const v = w[n]||0, half=50, pct=Math.abs(v)/maxAbs*half;
+    const left = v>=0? half : half-pct;
+    const color = v>=0? css('--blue') : css('--red');
+    return `<div class="wrow"><div class="wname">${n}</div>
+      <div class="wbar"><i style="left:${left}%;width:${pct}%;background:${color}"></i>
+        <i style="left:${half}%;width:1px;background:#3a3a38"></i></div>
+      <div class="wval" style="color:${color}">${v>=0?'+':''}${v.toFixed(2)}</div></div>`;
+  }).join('');
+}
+const PHASES={starting:'starting',extracting:'1/4 · extracting stream features',
+  training:'2/4 · SGD training',calibrating:'3/4 · conformal calibration',
+  stream_eval:'4/4 · stream-level evaluation',done:'done'};
+async function tick(){
+  try{
+    const m = await (await fetch('metrics.json?_='+Date.now())).json();
+    const ph = document.getElementById('phase');
+    ph.textContent = PHASES[m.phase]||m.phase;
+    ph.className = 'pill '+(m.phase==='done'?'done':'run');
+    document.getElementById('ds').textContent =
+      m.dataset.name?`${m.dataset.name} — train ${m.dataset.train} / test ${m.dataset.test}`:'';
+    document.getElementById('elapsed').textContent = Math.round((m.updated_at-m.started_at))+'s';
+    document.getElementById('mem').textContent = m.mem_mb??'–';
+    if(m.mem_mb){memHist.push(m.mem_mb); if(memHist.length>400) memHist.shift();}
+    const eps=m.epochs||[];
+    document.getElementById('upd').textContent = eps.length?eps[eps.length-1].sgd_updates.toLocaleString():'0';
+    // progress bar per phase
+    let done=0,total=1,label='';
+    if(m.phase==='extracting'){done=m.extract.done;total=m.extract.total;label=`streams ${done}/${total}`;}
+    else if(m.phase==='training'){done=eps.length;total=40;label=`epoch ${done}/40`;}
+    else if(m.phase==='calibrating'){done=m.calibrate.done;total=m.calibrate.total;label=`clean streams ${done}/${total}`;}
+    else if(m.phase==='stream_eval'||m.phase==='done'){done=m.stream_eval.done;total=m.stream_eval.total||1;label=`test streams ${done}/${total}`;}
+    document.getElementById('progbar').style.width=(100*done/Math.max(1,total))+'%';
+    document.getElementById('progtext').textContent=label;
+    document.getElementById('progpct').textContent=Math.round(100*done/Math.max(1,total))+'%';
+    document.getElementById('progtitle').textContent='Progress — '+(PHASES[m.phase]||m.phase);
+    if(eps.length){
+      const tl=eps.map(e=>e.train_loss), vl=eps.map(e=>e.test_loss);
+      const lmax=Math.max(...tl,...vl), lmin=Math.min(...tl,...vl);
+      line(document.getElementById('loss'),[tl,vl],Math.max(0,lmin*0.9),lmax*1.05,[css('--blue'),css('--magenta')]);
+      line(document.getElementById('acc'),[eps.map(e=>e.test_acc),eps.map(e=>e.test_auroc)],0.5,1.0,[css('--aqua'),css('--violet')]);
+      const last=eps[eps.length-1];
+      weights(document.getElementById('weights'), m.feature_names, last.weights);
+      document.getElementById('auroc').textContent=(+last.test_auroc).toFixed(3);
+    }
+    if(memHist.length>1) line(document.getElementById('memsvg'),[memHist],
+      Math.min(...memHist)*0.98, Math.max(...memHist)*1.02,[css('--yellow')]);
+    const se=m.stream_eval;
+    if(se && (se.tp+se.fn)>0) document.getElementById('tpr').textContent=(se.tp/(se.tp+se.fn)).toFixed(3);
+    if(se && (se.fp+se.tn)>0) document.getElementById('fpr').textContent=(se.fp/(se.fp+se.tn)).toFixed(3);
+    if(m.calibrate && m.calibrate.thresholds) document.getElementById('tau').textContent=m.calibrate.thresholds.corrupt_at;
+    if(m.phase==='done'&&m.final){
+      const v=document.getElementById('verdict'); v.style.display='block';
+      v.textContent=`✓ Training complete in ${m.final.elapsed_s}s — stream TPR ${m.final.tpr} · FPR ${m.final.fpr} · AUROC ${m.final.test_auroc} — saved to ${m.final.model_path}`;
+    }
+  }catch(e){ document.getElementById('phase').textContent='waiting for trainer…'; }
+}
+setInterval(tick, 600); tick();
+</script>
+</body></html>
