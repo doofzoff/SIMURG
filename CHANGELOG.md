@@ -3,6 +3,19 @@
 All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog.
 
+## [1.0.1] - 2026-08-24
+
+### Fixed
+
+- readme images and the paper link now use absolute URLs so they render
+  correctly on PyPI, not only on GitHub
+
+### Added
+
+- the full technical report (paper/simurg_paper.pdf) and a paper section
+  in the readme
+- the second author (E. Ahmadbayli) to the citation block
+
 ## [1.0.0] - 2026-08-24
 
 ### Added

@@ -26,20 +26,21 @@ SIMURG reads 197,000.
 <summary><b>Table of contents</b></summary>
 
 1. [The problem](#the-problem)
-2. [How SIMURG differs](#how-simurg-differs)
-3. [How it works](#how-it-works)
-4. [Zero-leak in action](#zero-leak-in-action)
-5. [Benchmark](#benchmark)
-6. [Install](#install)
-7. [Quick start](#quick-start)
-8. [Teach it your domain and your failure modes](#teach-it-your-domain-and-your-failure-modes)
-9. [Live guard dashboard](#live-guard-dashboard)
-10. [What SIMURG is NOT](#what-simurg-is-not)
-11. [Repository layout](#repository-layout)
-12. [Roadmap](#roadmap)
-13. [FAQ](#faq)
-14. [Citation](#citation)
-15. [License](#license)
+2. [Paper](#paper)
+3. [How SIMURG differs](#how-simurg-differs)
+4. [How it works](#how-it-works)
+5. [Zero-leak in action](#zero-leak-in-action)
+6. [Benchmark](#benchmark)
+7. [Install](#install)
+8. [Quick start](#quick-start)
+9. [Teach it your domain and your failure modes](#teach-it-your-domain-and-your-failure-modes)
+10. [Live guard dashboard](#live-guard-dashboard)
+11. [What SIMURG is NOT](#what-simurg-is-not)
+12. [Repository layout](#repository-layout)
+13. [Roadmap](#roadmap)
+14. [FAQ](#faq)
+15. [Citation](#citation)
+16. [License](#license)
 
 </details>
 
@@ -68,6 +69,17 @@ compressibility, and predictive surprise all move in measurable ways.
 SIMURG watches that signature character by character, decides in real time whether
 the stream has gone bad, tells you **where** it started, and lets you **abort and
 retry** before the user ever sees the corruption.
+
+---
+
+## Paper
+
+The full technical report, with the complete evaluation, per-class analysis,
+onset-localization study, and the zero-leak protocol specification:
+
+> **SIMURG: Zero-Leak Online Detection of LLM Decoding Corruption in
+> Production Streams**, F. Aghayev, E. Ahmadbayli, HAL-X AI, 2026.
+> [Read the paper (PDF, 13 pages)](https://github.com/doofzoff/SIMURG/blob/main/paper/simurg_paper.pdf?raw=true)
 
 ---
 
@@ -163,7 +175,7 @@ contract with the host is a **retry**: `GuardedLLM` regenerates the answer and
 the host replaces the shown text, so the bad tail never becomes the final
 output:
 
-![zero-leak demo: corruption score stays flat, crosses the calibrated threshold, abort and retry](figures/zero_leak_demo.png)
+![zero-leak demo: corruption score stays flat, crosses the calibrated threshold, abort and retry](https://raw.githubusercontent.com/doofzoff/SIMURG/main/figures/zero_leak_demo.png)
 
 Every alarm carries the reasons that fired it. For the stream above:
 
@@ -204,9 +216,9 @@ Test split (81 streams), seed 7:
 In addition, the shipped detector **flagged 0 false alarms on 121 real production
 texts** from a self-hosted reasoning-model deployment.
 
-![detection recall per failure class, and the latency distribution past onset](figures/recall_latency.png)
+![detection recall per failure class, and the latency distribution past onset](https://raw.githubusercontent.com/doofzoff/SIMURG/main/figures/recall_latency.png)
 
-![learned feature weights: the 15-weight online logistic model after calibration](figures/feature_weights.png)
+![learned feature weights: the 15-weight online logistic model after calibration](https://raw.githubusercontent.com/doofzoff/SIMURG/main/figures/feature_weights.png)
 
 **Those numbers describe the bundled domain.** The detector is only as good as the
 clean corpus it calibrates against, so retrain on your own traffic before you
@@ -402,6 +414,7 @@ docs/                    TRAINING.md, CUSTOM.md
 examples/                runnable quickstart
 tests/                   sentinel regressions + end-to-end dashboard tests
 figures/                 benchmark figures referenced by this README
+paper/                   the full technical report (PDF)
 .github/workflows/       CI: test matrix on 3.10 / 3.12 / 3.13 + build check
 CHANGELOG.md             release history
 ```
@@ -469,10 +482,11 @@ guide: [docs/TRAINING.md](docs/TRAINING.md).
 ```bibtex
 @techreport{aghayev2026simurg,
   title       = {SIMURG: Zero-Leak Online Detection of LLM Decoding Corruption in Production Streams},
-  author      = {Aghayev, Farid},
+  author      = {Aghayev, Farid and Ahmadbayli, Elturan},
   institution = {HAL-X AI},
   year        = {2026},
-  url         = {https://github.com/doofzoff/SIMURG}
+  url         = {https://github.com/doofzoff/SIMURG},
+  note        = {technical report, see paper/simurg_paper.pdf}
 }
 ```
 

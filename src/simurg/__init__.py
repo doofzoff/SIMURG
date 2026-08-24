@@ -36,7 +36,7 @@ from .learning.custom import (CustomLearnedDetector, DetectabilityReport,
                               LexiconDetector, fit_custom_detector)
 from .integrations.openai_guard import GuardedLLM
 
-__version__ = "1.0.0"
+__version__ = "1.0.1"
 
 __all__ = [
     "Simurg", "Verdict", "StreamFeatures", "OnlineLogReg", "ConformalEnsemble",
