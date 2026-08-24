@@ -1,8 +1,10 @@
 <h1 align="center">SIMURG</h1>
 <p align="center"><b>Streaming Integrity Monitor &amp; Universal Regeneration Guard</b></p>
 <p align="center">
-Catch LLM decoding corruption <b>while the answer is still being generated</b>, and abort
-<b>before a single bad token reaches the user</b>.
+Catch LLM decoding corruption <b>while the answer is still being generated</b> and cut the
+stream <b>mid-flight</b>: corruption that starts in the hold window never reaches the
+user, and mid-stream corruption is aborted within a few hundred characters of onset,
+so the host regenerates the answer.
 </p>
 <p align="center">
 <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-blue">
@@ -29,12 +31,13 @@ SIMURG reads 197,000.
 5. [Benchmark](#benchmark)
 6. [Quick start](#quick-start)
 7. [Teach it your domain and your failure modes](#teach-it-your-domain-and-your-failure-modes)
-8. [What SIMURG is NOT](#what-simurg-is-not)
-9. [Repository layout](#repository-layout)
-10. [Roadmap](#roadmap)
-11. [FAQ](#faq)
-12. [Citation](#citation)
-13. [License](#license)
+8. [Live guard dashboard](#live-guard-dashboard)
+9. [What SIMURG is NOT](#what-simurg-is-not)
+10. [Repository layout](#repository-layout)
+11. [Roadmap](#roadmap)
+12. [FAQ](#faq)
+13. [Citation](#citation)
+14. [License](#license)
 
 </details>
 
@@ -71,7 +74,7 @@ retry** before the user ever sees the corruption.
 | | **SIMURG** | post-hoc linter | LLM-as-judge | perplexity threshold |
 |---|---|---|---|---|
 | when it fires | **mid-generation**, ~590 chars past onset | after the full answer | after the full answer | post-hoc, or needs logprob access |
-| what the user sees | **zero bad tokens** (hold, release, abort protocol) | the whole corrupt answer | the whole corrupt answer | varies |
+| what the user sees | **zero bad tokens when onset is in the hold window**; otherwise the clean prefix plus a bad tail of at most ~900 chars, replaced by the retry | the whole corrupt answer | the whole corrupt answer | varies |
 | why it fired | a named, human-readable reason on every alarm | a pattern list | the judge's opinion, if any | one number |
 | model-agnostic | any OpenAI-compatible endpoint, or any stream you feed | any | any | needs a logprob-capable backend |
 | overhead | numpy-only, ~197k chars/sec on one CPU core | trivial | one extra LLM call per answer | per-token logprobs |
@@ -148,9 +151,15 @@ threshold you hope holds.
 
 ## Zero-leak in action
 
-A synthetic stream that is clean prose and then collapses into a repetition loop.
-SIMURG holds the opening, verifies the clean prefix, and aborts 821 characters
-after the loop starts. The user received clean prose and nothing else:
+A synthetic stream that is clean prose and then collapses into a repetition loop
+at character 339. SIMURG holds the opening, verifies the clean prefix, scores
+the stream at every 400-char checkpoint, and aborts 821 characters after the
+loop starts. Corrupt streams that are already bad at the 350-char checkpoint
+are blocked fully (12 of 21 in the benchmark, see below); for this mid-stream
+onset the user sees the clean prefix plus a short bad tail, and the guard's
+contract with the host is a **retry**: `GuardedLLM` regenerates the answer and
+the host replaces the shown text, so the bad tail never becomes the final
+output:
 
 ![zero-leak demo: corruption score stays flat, crosses the calibrated threshold, abort and retry](figures/zero_leak_demo.png)
 
@@ -312,6 +321,34 @@ per epoch**, memory, and the final held-out TPR/FPR verdict.
 
 ---
 
+## Live guard dashboard
+
+A second web page for *runtime*: connect it to any OpenAI-compatible endpoint,
+send a prompt, and watch the answer get guarded while it is generated. The
+dashboard renders in real time:
+
+- the **released stream text** (what the user would actually see),
+- the **fused corruption score** with the calibrated SUSPECT/ABORT thresholds
+  and the 350-char hold zone,
+- the **corruption onset marker** and the human-readable **reasons**,
+- **all 15 stream features** as sparklines, sampled at every checkpoint.
+
+Every run is recorded as a **session** (timestamped frames with score, state,
+released text, features and reasons). The sessions panel lists them, deletes
+them, and **replays any session at up to 128x** for postmortem analysis, so a
+corrupt answer from Tuesday can be re-watched the way a crash log is read.
+
+```bash
+python3 -m simurg.guard_dashboard --port 8321
+# open http://127.0.0.1:8321, point it at your endpoint, guard a stream
+```
+
+Pasted texts can also be analyzed at full speed in the same UI. Same
+self-contained dark style as the training dashboard, zero new dependencies:
+the server is stdlib-only and acts as a CORS-free proxy to your endpoint.
+
+---
+
 ## What SIMURG is NOT
 
 SIMURG detects **corrupt or degenerate decoding**, not **factual wrongness**. A
@@ -338,9 +375,12 @@ src/simurg/
 ├── integrations/        GuardedLLM, the OpenAI-compatible drop-in guard
 ├── data/                CorruptBench synth, dataset builder, benchmark, generator
 ├── training/            live-training run + real-time web dashboard
+├── guard_dashboard.py   live guard dashboard server (stdlib-only, SSE, sessions)
+├── guard_ui/            live guard dashboard front-end + recorded sessions
 └── weights/             shipped model + conformal thresholds (use as a pair)
 docs/                    TRAINING.md, CUSTOM.md
 examples/                runnable quickstart
+tests/                   sentinel regressions + end-to-end dashboard tests
 figures/                 benchmark figures referenced by this README
 ```
 
@@ -361,14 +401,14 @@ Ideas under active consideration, in rough priority order:
 3. **Zero-dependency runtime.** Export the guard core (features, sketches,
    fusion) to ONNX or a small C library that runs inside the inference server
    with no Python, for hosts that cannot take a numpy dependency on the hot path.
-4. **Live guard dashboard.** A browser page that connects to any
-   OpenAI-compatible endpoint, streams the answer through SIMURG, and renders the
-   score curve, the 15 feature curves, and the verdict in real time, with replay
-   for postmortems.
-5. **CI regression suite.** A golden corpus of labeled clean and corrupt streams
+4. **CI regression suite.** A golden corpus of labeled clean and corrupt streams
    with fixed expected verdicts, plus latency and throughput budgets, run as a
    GitHub Action on every pull request: the build fails when a threshold tweak
    quietly degrades detection.
+5. **Multi-stream fleet mode.** Guard N parallel live streams in one process,
+   with per-stream sessions and a single dashboard that compares corruption
+   rates across endpoints, so a bad quantization shows up as one lane going red
+   while the others stay green.
 
 ---
 
