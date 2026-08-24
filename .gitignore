@@ -4,6 +4,7 @@ __pycache__/
 build/
 dist/
 src/simurg/training/train_ui/serve/
+src/simurg/guard_ui/sessions/
 src/simurg/weights/*_hf.json
 src/simurg/data/*.jsonl
 src/simurg/data/stats.json

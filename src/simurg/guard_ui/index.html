@@ -73,6 +73,15 @@
   svg text{font:10.5px "Segoe UI",system-ui,sans-serif;fill:var(--dim)}
   .fgrid{display:grid;grid-template-columns:repeat(5,1fr);gap:8px}
   @media(max-width:1200px){.fgrid{grid-template-columns:repeat(3,1fr)}}
+  .sess{display:flex;align-items:center;gap:8px;background:#1d1d1b;border:1px solid transparent;
+        border-radius:8px;padding:7px 9px;margin-bottom:6px;cursor:pointer;font-size:12px}
+  .sess:hover{border-color:#3a3a38}
+  .sess.sel{border-color:var(--brand);background:rgba(231,33,102,.08)}
+  .sess .sid{color:var(--dim);font-family:ui-monospace,Menlo,monospace;font-size:11px}
+  .sess .st{margin-left:auto;font-weight:700;font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+  .sess .st.clean{color:#7fce7f}.sess .st.suspect{color:#e8b25c}.sess .st.corrupt{color:var(--red)}
+  .sess .st.error{color:var(--red)}
+  .sess .sm{color:var(--dim);font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:110px}
   .fcell{background:#1d1d1b;border-radius:8px;padding:6px 8px}
   .fcell .fn{font-size:10.5px;color:var(--muted);display:flex;justify-content:space-between;gap:6px}
   .fcell .fv{color:var(--ink);font-weight:700;font-variant-numeric:tabular-nums}
@@ -115,6 +124,20 @@
         <h3>Analyze a pasted stream</h3>
         <textarea id="paste" rows="4" placeholder="paste a finished answer to run it through the sentinel…"></textarea>
         <button id="btnPaste" class="ghost">analyze pasted text</button>
+      </div>
+      <div class="card" style="margin-top:16px">
+        <h3>Sessions · replay for postmortems</h3>
+        <div id="sesslist" style="max-height:230px;overflow-y:auto"></div>
+        <div class="row">
+          <div><label>replay speed</label>
+            <select id="speed"><option value="1">1x (real time)</option>
+            <option value="8">8x</option><option value="32" selected>32x</option>
+            <option value="128">128x</option></select></div>
+          <div style="display:flex;gap:8px;align-items:flex-end">
+            <button id="btnReplay" class="ghost" style="flex:1;margin-top:8px">replay</button>
+            <button id="btnDel" class="ghost" style="flex:1;margin-top:8px">delete</button>
+          </div>
+        </div>
       </div>
       <footer>runs through the local guard_dashboard server · zero new dependencies</footer>
     </div>
@@ -276,6 +299,7 @@ function onFinal(d){
   else setBanner('error', d.reasons || null);
   setPill(d.state);
   scheduleDraw();
+  loadSessions();
 }
 
 async function runSse(url, body){
@@ -318,11 +342,64 @@ function reset(){
   $('chars').textContent = '0';
   drawScore(); drawFeatures();
 }
+// ── sessions & replay ────────────────────────────────────────────────────────
+let selectedSession = null;
+let runToken = 0;
+async function loadSessions(){
+  let list = [];
+  try{ list = await (await fetch('/api/sessions')).json(); }catch(e){ return; }
+  const g = $('sesslist');
+  if(!list.length){ g.innerHTML = '<div style="color:var(--dim);font-size:12px">no sessions yet</div>'; return; }
+  g.innerHTML = list.map(s => {
+    const when = new Date((s.created_at||0) * 1000).toLocaleTimeString();
+    return `<div class="sess" data-id="${s.id}"><span class="sid">${s.id}</span>
+      <span class="sm">${s.model || ''}</span><span class="sid">${s.chars||0}c · ${when}</span>
+      <span class="st ${s.state||''}">${s.state||'?'}</span></div>`;
+  }).join('');
+  g.querySelectorAll('.sess').forEach(el => el.onclick = () => {
+    g.querySelectorAll('.sess').forEach(x => x.classList.remove('sel'));
+    el.classList.add('sel');
+    selectedSession = el.dataset.id;
+  });
+}
+function startReplay(id){
+  const my = ++runToken;
+  running = false;
+  $('btnGo').disabled = $('btnPaste').disabled = $('btnReplay').disabled = true;
+  fetch('/api/sessions/' + id).then(r => r.json()).then(doc => {
+    if(my !== runToken) return;
+    reset();
+    $('meta1').textContent = 'replay: ' + (doc.model || id);
+    const frames = doc.frames || [];
+    if(!frames.length){ onFinal(doc.final || {}); $('btnGo').disabled = $('btnPaste').disabled = $('btnReplay').disabled = false; return; }
+    const speed = +$('speed').value;
+    const t0 = performance.now();
+    let i = 0;
+    (function step(){
+      if(my !== runToken) return;
+      const vt = (performance.now() - t0) * speed;
+      while(i < frames.length && frames[i].t <= vt){ onToken(frames[i]); i++; }
+      if(i < frames.length) requestAnimationFrame(step);
+      else { onFinal(doc.final || {}); $('btnGo').disabled = $('btnPaste').disabled = $('btnReplay').disabled = false; }
+    })();
+  }).catch(e => { setBanner('error', [e.message]);
+    $('btnGo').disabled = $('btnPaste').disabled = $('btnReplay').disabled = false; });
+}
+$('btnReplay').onclick = () => selectedSession && startReplay(selectedSession);
+$('btnDel').onclick = async () => {
+  if(!selectedSession) return;
+  await fetch('/api/sessions/' + selectedSession, {method:'DELETE'});
+  selectedSession = null;
+  loadSessions();
+};
+
 function begin(){
+  runToken++;
   running = true; runStart = performance.now();
-  $('btnGo').disabled = $('btnPaste').disabled = true;
+  $('btnGo').disabled = $('btnPaste').disabled = $('btnReplay').disabled = true;
   reset();
 }
+loadSessions();
 setInterval(() => {
   if(!running || !runStart) return;
   const el = (performance.now() - runStart) / 1000;

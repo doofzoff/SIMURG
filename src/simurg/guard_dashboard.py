@@ -21,7 +21,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import time
+import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib import error as urlerror
 from urllib import request as urlrequest
@@ -31,6 +33,8 @@ from .detection.sentinel import CORRUPT, Simurg
 
 PKG = os.path.dirname(os.path.abspath(__file__))
 UI_HTML = os.path.join(PKG, "guard_ui", "index.html")
+SESSIONS_DIR = os.path.join(PKG, "guard_ui", "sessions")
+_SESSION_ID_RE = re.compile(r"^[0-9a-f]{12}$")
 HOLD = 350          # mirror Simurg defaults so the UI can show the hold phase
 CHECK_EVERY = 400
 
@@ -46,7 +50,41 @@ def _sse(event: str, data: dict) -> bytes:
     return f"event: {event}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n".encode()
 
 
-def _guard_stream(sim: Simurg, chunks, emit):
+def _save_session(sid: str, meta: dict, frames: list, final: dict) -> dict:
+    doc = {"id": sid, "created_at": time.time(), **meta,
+           "frames": frames, "final": final}
+    os.makedirs(SESSIONS_DIR, exist_ok=True)
+    tmp = os.path.join(SESSIONS_DIR, sid + ".json.tmp")
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(doc, f)
+    os.replace(tmp, os.path.join(SESSIONS_DIR, sid + ".json"))
+    return doc
+
+
+def _list_sessions():
+    if not os.path.isdir(SESSIONS_DIR):
+        return []
+    out = []
+    for name in os.listdir(SESSIONS_DIR):
+        if not name.endswith(".json"):
+            continue
+        try:
+            with open(os.path.join(SESSIONS_DIR, name), encoding="utf-8") as f:
+                doc = json.load(f)
+        except (ValueError, OSError):
+            continue
+        fin = doc.get("final") or {}
+        out.append({"id": doc.get("id", name[:-5]),
+                    "created_at": doc.get("created_at"),
+                    "mode": doc.get("mode"), "model": doc.get("model"),
+                    "state": fin.get("state"), "chars": fin.get("chars"),
+                    "frames": len(doc.get("frames") or [])})
+    out.sort(key=lambda d: d.get("created_at") or 0, reverse=True)
+    return out[:50]
+
+
+def _guard_stream(sim: Simurg, chunks, emit, record: list | None = None,
+                  t0: float | None = None):
     """Feed chunks into sim, emit SSE events, stop at CORRUPT. Returns stats."""
     released_chars = 0
     last_state = "idle"
@@ -58,7 +96,7 @@ def _guard_stream(sim: Simurg, chunks, emit):
         interesting = bool(v.released) or v.p_corrupt > 0 or v.state != last_state
         if interesting:
             last_state = v.state
-            emit(_sse("token", {
+            payload = {
                 "chars": sim.f.total_len,
                 "p": round(v.p_corrupt, 4),
                 "state": v.state,
@@ -68,7 +106,10 @@ def _guard_stream(sim: Simurg, chunks, emit):
                 "features": ({k: round(float(x), 5)
                               for k, x in zip(sim.f.VECTOR, sim.f.vector())}
                              if v.p_corrupt > 0 else None),
-            }))
+            }
+            emit(_sse("token", payload))
+            if record is not None:
+                record.append({"t": round((time.time() - t0) * 1000), **payload})
         if v.state == CORRUPT:
             aborted = True
             break
@@ -185,6 +226,29 @@ class Handler(BaseHTTPRequestHandler):
                            "text/plain")
         elif self.path == "/api/health":
             self._json(200, {"ok": True, "version": __version__})
+        elif self.path == "/api/sessions":
+            self._json(200, _list_sessions())
+        elif self.path.startswith("/api/sessions/"):
+            sid = self.path.rsplit("/", 1)[-1]
+            if not _SESSION_ID_RE.match(sid):
+                return self._json(400, {"error": "bad session id"})
+            path = os.path.join(SESSIONS_DIR, sid + ".json")
+            if not os.path.exists(path):
+                return self._json(404, {"error": "session not found"})
+            with open(path, encoding="utf-8") as f:
+                self._json(200, json.load(f))
+        else:
+            self._json(404, {"error": "not found"})
+
+    def do_DELETE(self):
+        if self.path.startswith("/api/sessions/"):
+            sid = self.path.rsplit("/", 1)[-1]
+            if not _SESSION_ID_RE.match(sid):
+                return self._json(400, {"error": "bad session id"})
+            path = os.path.join(SESSIONS_DIR, sid + ".json")
+            if os.path.exists(path):
+                os.remove(path)
+            self._json(200, {"ok": True})
         else:
             self._json(404, {"error": "not found"})
 
@@ -203,14 +267,23 @@ class Handler(BaseHTTPRequestHandler):
             }
 
             def run(emit):
+                sid = uuid.uuid4().hex[:12]
+                frames: list[dict] = []
+                t0 = time.time()
+                user_msg = next((m.get("content", "") for m in reversed(messages)
+                                 if m.get("role") == "user"), "")
                 emit(_sse("start", {"mode": "generate", "hold": HOLD,
-                                    "check_every": CHECK_EVERY, "model": model}))
+                                    "check_every": CHECK_EVERY, "model": model,
+                                    "session_id": sid}))
                 sim = Simurg()
-                _guard_stream(sim, _upstream_chunks(url, model, cfg["api_key"],
-                                                    messages, cfg["max_tokens"],
-                                                    cfg["temperature"],
-                                                    timeout=int(b.get("timeout") or 120)),
-                              emit)
+                stats = _guard_stream(sim, _upstream_chunks(url, model, cfg["api_key"],
+                                                            messages, cfg["max_tokens"],
+                                                            cfg["temperature"],
+                                                            timeout=int(b.get("timeout") or 120)),
+                                      emit, record=frames, t0=t0)
+                _save_session(sid, {"mode": "generate", "model": model,
+                                    "endpoint": url, "prompt": user_msg[:300]},
+                              frames, {**stats, "session_id": sid})
 
             self._sse_stream(run)
         elif self.path == "/api/analyze":
@@ -221,11 +294,19 @@ class Handler(BaseHTTPRequestHandler):
             chunk = max(8, int(b.get("chunk") or 40))
 
             def run(emit):
+                sid = uuid.uuid4().hex[:12]
+                frames: list[dict] = []
+                t0 = time.time()
                 emit(_sse("start", {"mode": "analyze", "hold": HOLD,
-                                    "check_every": CHECK_EVERY, "model": "pasted"}))
+                                    "check_every": CHECK_EVERY, "model": "pasted",
+                                    "session_id": sid}))
                 sim = Simurg()
                 pieces = [text[i:i + chunk] for i in range(0, len(text), chunk)]
-                _guard_stream(sim, iter(pieces), emit)
+                stats = _guard_stream(sim, iter(pieces), emit,
+                                      record=frames, t0=t0)
+                _save_session(sid, {"mode": "analyze", "model": "pasted",
+                                    "prompt": text[:300]}, frames,
+                              {**stats, "session_id": sid})
 
             self._sse_stream(run)
         else:
