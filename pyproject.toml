@@ -22,6 +22,7 @@ dependencies = ["numpy>=1.24"]
 
 [project.optional-dependencies]
 figures = ["matplotlib>=3.7"]
+test = ["pytest>=7"]
 
 [project.urls]
 Homepage = "https://hal-x.ai"
