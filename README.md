@@ -29,15 +29,16 @@ SIMURG reads 197,000.
 3. [How it works](#how-it-works)
 4. [Zero-leak in action](#zero-leak-in-action)
 5. [Benchmark](#benchmark)
-6. [Quick start](#quick-start)
-7. [Teach it your domain and your failure modes](#teach-it-your-domain-and-your-failure-modes)
-8. [Live guard dashboard](#live-guard-dashboard)
-9. [What SIMURG is NOT](#what-simurg-is-not)
-10. [Repository layout](#repository-layout)
-11. [Roadmap](#roadmap)
-12. [FAQ](#faq)
-13. [Citation](#citation)
-14. [License](#license)
+6. [Install](#install)
+7. [Quick start](#quick-start)
+8. [Teach it your domain and your failure modes](#teach-it-your-domain-and-your-failure-modes)
+9. [Live guard dashboard](#live-guard-dashboard)
+10. [What SIMURG is NOT](#what-simurg-is-not)
+11. [Repository layout](#repository-layout)
+12. [Roadmap](#roadmap)
+13. [FAQ](#faq)
+14. [Citation](#citation)
+15. [License](#license)
 
 </details>
 
@@ -210,6 +211,24 @@ texts** from a self-hosted reasoning-model deployment.
 clean corpus it calibrates against, so retrain on your own traffic before you
 trust it in production. It takes seconds, see
 [below](#teach-it-your-domain-and-your-failure-modes).
+
+---
+
+## Install
+
+```bash
+pip install simurg        # numpy only
+pip install simurg[figures]   # + matplotlib, for the paper plots
+pip install simurg[test]      # + pytest
+```
+
+From source:
+
+```bash
+git clone https://github.com/doofzoff/SIMURG.git
+cd SIMURG
+pip install -e .
+```
 
 ---
 

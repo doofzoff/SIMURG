@@ -9,7 +9,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "simurg-guard"
+name = "simurg"
 version = "1.0.0"
 description = "Zero-leak online detection of LLM decoding corruption in production streams"
 readme = "README.md"
