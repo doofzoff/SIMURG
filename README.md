@@ -8,6 +8,7 @@ so the host regenerates the answer.
 </p>
 <p align="center">
 <img alt="license" src="https://img.shields.io/badge/license-Apache--2.0-blue">
+<img alt="pypi" src="https://img.shields.io/pypi/v/simurg">
 <img alt="python" src="https://img.shields.io/badge/python-%E2%89%A53.10-blue">
 <img alt="dependencies" src="https://img.shields.io/badge/dependencies-numpy%20only-green">
 <img alt="cpu" src="https://img.shields.io/badge/runtime-CPU%2C%20no%20GPU-lightgrey">
@@ -401,6 +402,8 @@ docs/                    TRAINING.md, CUSTOM.md
 examples/                runnable quickstart
 tests/                   sentinel regressions + end-to-end dashboard tests
 figures/                 benchmark figures referenced by this README
+.github/workflows/       CI: test matrix on 3.10 / 3.12 / 3.13 + build check
+CHANGELOG.md             release history
 ```
 
 ---
