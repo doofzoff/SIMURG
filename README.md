@@ -249,7 +249,7 @@ pip install -e .
 
 ### 1. Guard any OpenAI-compatible endpoint (3 lines)
 
-Works with **vLLM, llama.cpp server, TGI, Ollama, OpenAI, OpenRouter**: anything
+Works with **vLLM, llama.cpp server, TGI, Ollama, SGLang, OpenAI, OpenRouter**: anything
 that speaks `/v1/chat/completions`. Batteries included: the zero-leak protocol
 plus an **abort, retry, fallback-model** ladder.
 
