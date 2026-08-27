@@ -1,0 +1,199 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>SIMURG Veritas · live guard</title>
+<style>
+:root{--bg:#0b0d12;--panel:#12151c;--panel2:#171b24;--line:#232936;--ink:#e7ebf2;--sub:#8b94a6;
+--brand:#E72166;--green:#199e70;--amber:#c98500;--red:#e66767;--blue:#3987e5;--violet:#9085e9;}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 -apple-system,Segoe UI,Roboto,Inter,sans-serif}
+.top{display:flex;align-items:center;gap:14px;padding:14px 22px;border-bottom:1px solid var(--line)}
+.top h1{font-size:15px;margin:0;letter-spacing:.5px;font-weight:700}
+.top .b{color:var(--brand)} .top .sub{color:var(--sub);font-size:12px}
+.pill{margin-left:auto;font-size:11px;color:var(--sub);border:1px solid var(--line);border-radius:20px;padding:4px 10px}
+.wrap{display:grid;grid-template-columns:1.15fr .85fr;gap:14px;padding:14px 18px;max-width:1500px;margin:0 auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+.card h2{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--sub);margin:0 0 10px}
+textarea{width:100%;background:var(--panel2);border:1px solid var(--line);color:var(--ink);border-radius:9px;
+padding:10px 12px;font:14px/1.5 inherit;resize:vertical;min-height:52px}
+.row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+button{background:var(--brand);color:#fff;border:0;border-radius:9px;padding:9px 16px;font-weight:600;cursor:pointer}
+button.ghost{background:var(--panel2);color:var(--ink);border:1px solid var(--line)}
+button:disabled{opacity:.5;cursor:default}
+.ans{margin-top:12px;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:12px 14px;
+min-height:120px;max-height:340px;overflow:auto;font-size:15px;line-height:1.7;white-space:pre-wrap;word-break:break-word}
+.tok{border-radius:3px;padding:0 1px} .fact{text-decoration:underline;text-decoration-color:var(--sub);text-underline-offset:3px}
+.flag{outline:1px solid var(--red);border-radius:3px}
+.reason{margin-top:8px;font-size:12px;color:var(--sub);max-height:0;overflow:hidden;transition:max-height .3s}
+.reason.open{max-height:200px;overflow:auto}
+.reason .rt{opacity:.55}
+.metrics{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-top:4px}
+.metric{background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:9px 11px}
+.metric .v{font-size:20px;font-weight:700} .metric .k{font-size:10px;color:var(--sub);text-transform:uppercase;letter-spacing:.8px}
+.chart{width:100%;height:96px;background:var(--panel2);border:1px solid var(--line);border-radius:9px}
+.legend{display:flex;gap:14px;font-size:11px;color:var(--sub);margin:6px 2px}
+.dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.weights .w{display:flex;align-items:center;gap:8px;margin:5px 0;font-size:12px}
+.weights .wl{width:96px;color:var(--sub)} .weights .bar{flex:1;height:8px;background:#0e1218;border-radius:4px;overflow:hidden}
+.weights .fill{height:100%;background:var(--blue)}
+.log{font:11px/1.5 ui-monospace,Menlo,monospace;background:#0a0c11;border:1px solid var(--line);border-radius:9px;
+padding:8px 10px;max-height:220px;overflow:auto;color:var(--sub)}
+.log .f{color:var(--red)} .log .g{color:var(--green)} .log .a{color:var(--amber)}
+.verdict{margin-top:12px;border-radius:10px;padding:12px 14px;font-weight:600;display:none}
+.verdict.confident{display:block;background:rgba(25,158,112,.14);color:#7ee0b6;border:1px solid rgba(25,158,112,.4)}
+.verdict.hedge{display:block;background:rgba(201,133,0,.14);color:#f0c37a;border:1px solid rgba(201,133,0,.4)}
+.verdict.abstain,.verdict.error{display:block;background:rgba(230,103,103,.14);color:#f2a3a3;border:1px solid rgba(230,103,103,.4)}
+.mini{font-size:11px;color:var(--sub)}
+.stack{display:flex;flex-direction:column;gap:14px}
+input[type=range]{width:100%}
+@media(max-width:1000px){.wrap{grid-template-columns:1fr}}
+</style></head>
+<body>
+<div class="top">
+  <h1>SIMURG <span class="b">Veritas</span> <span class="sub">· live faithful-generation guard</span></h1>
+  <span class="pill" id="modelPill">model …</span>
+</div>
+<div class="wrap">
+  <!-- LEFT: interaction + answer -->
+  <div class="stack">
+    <div class="card">
+      <h2>Prompt</h2>
+      <textarea id="msg" placeholder="Ask the model something factual…">What is the exact GDP growth of Azerbaijan in 2027 and the inflation rate?</textarea>
+      <div class="row" style="margin-top:10px">
+        <button id="go">Generate + guard</button>
+        <button id="verify" class="ghost" disabled>Deep verify (L3+L4)</button>
+        <span class="mini">temp <input id="temp" type="range" min="0" max="1.2" step="0.1" value="0.7" style="width:90px;vertical-align:middle"> <b id="tempv">0.7</b></span>
+      </div>
+      <div class="ans" id="ans"></div>
+      <div class="row" style="margin-top:6px"><span class="mini" id="reasonToggle" style="cursor:pointer">▸ model reasoning</span></div>
+      <div class="reason" id="reason"></div>
+      <div class="verdict" id="verdict"></div>
+    </div>
+    <div class="card">
+      <h2>Live signals</h2>
+      <div class="metrics">
+        <div class="metric"><div class="v" id="mFact">0.00</div><div class="k">fact uncertainty</div></div>
+        <div class="metric"><div class="v" id="mCorr">0.00</div><div class="k">corruption</div></div>
+        <div class="metric"><div class="v" id="mRisk">0.00</div><div class="k">fused risk</div></div>
+        <div class="metric"><div class="v" id="mFlag">0/0</div><div class="k">flagged facts</div></div>
+      </div>
+    </div>
+  </div>
+  <!-- RIGHT: real-time debug -->
+  <div class="stack">
+    <div class="card">
+      <h2>Per-token entropy & risk (real time)</h2>
+      <svg class="chart" id="chart" viewBox="0 0 600 96" preserveAspectRatio="none"></svg>
+      <div class="legend">
+        <span><span class="dot" style="background:var(--blue)"></span>token entropy</span>
+        <span><span class="dot" style="background:var(--brand)"></span>fused risk</span>
+        <span><span class="dot" style="background:var(--red)"></span>corruption</span>
+        <span><span class="dot" style="background:var(--amber)"></span>flagged fact</span>
+      </div>
+    </div>
+    <div class="card weights">
+      <h2>Veritas knobs (live thresholds)</h2>
+      <div class="w"><div class="wl">entropy bar</div><div class="bar"><div class="fill" id="wEnt" style="width:60%"></div></div><b id="wEntv">1.20</b></div>
+      <div class="w"><div class="wl">margin bar</div><div class="bar"><div class="fill" id="wMar" style="background:var(--violet);width:30%"></div></div><b id="wMarv">0.60</b></div>
+      <div class="w"><div class="wl">abstain τ</div><div class="bar"><div class="fill" id="wTau" style="background:var(--brand);width:50%"></div></div><b id="wTauv">0.50</b></div>
+      <div class="mini" style="margin-top:8px">gate = 0.40·corruption + 0.35·fact (+0.15·semantic +0.10·verify when run)</div>
+    </div>
+    <div class="card">
+      <h2>Debug log</h2>
+      <div class="log" id="log"></div>
+    </div>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const ent=[],risk=[],corr=[],flags=[];
+$('temp').oninput=e=>$('tempv').textContent=e.target.value;
+$('reasonToggle').onclick=()=>{$('reason').classList.toggle('open');
+  $('reasonToggle').textContent=($('reason').classList.contains('open')?'▾':'▸')+' model reasoning';};
+fetch('/api/health').then(r=>r.json()).then(d=>$('modelPill').textContent=d.model||'model');
+
+function entColor(H,fact,flagged){
+  if(flagged) return 'var(--red)';
+  if(!fact) return 'var(--ink)';
+  if(H<0.5) return '#7ee0b6'; if(H<1.1) return '#f0c37a'; return '#f2a3a3';
+}
+function drawChart(){
+  const w=600,h=96,n=Math.max(ent.length,1),svg=$('chart');
+  const path=(arr,max,col,fill)=>{
+    if(!arr.length)return '';
+    const pts=arr.map((v,i)=>[i/(n-1||1)*w, h-Math.min(v/max,1)*(h-8)-4]);
+    let d='M'+pts.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' L');
+    let area=fill?`<path d="${d} L${w},${h} L0,${h} Z" fill="${col}" opacity="0.08"/>`:'';
+    return area+`<path d="${d}" fill="none" stroke="${col}" stroke-width="1.6"/>`;
+  };
+  const marks=flags.map((f,i)=>f?`<circle cx="${(i/(n-1||1)*w).toFixed(1)}" cy="6" r="2.4" fill="var(--amber)"/>`:'').join('');
+  svg.innerHTML=path(ent,3.0,'var(--blue)',true)+path(risk,1.0,'var(--brand)',false)
+    +path(corr,1.0,'var(--red)',false)+marks;
+}
+function addLog(t,cls){const l=$('log');const d=document.createElement('div');if(cls)d.className=cls;d.textContent=t;
+  l.appendChild(d);l.scrollTop=l.scrollHeight;}
+
+async function stream(endpoint,payload,handlers){
+  const res=await fetch(endpoint,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+  const rd=res.body.getReader();const dec=new TextDecoder();let buf='';
+  while(true){const {value,done}=await rd.read();if(done)break;buf+=dec.decode(value,{stream:true});
+    let parts=buf.split('\n\n');buf=parts.pop();
+    for(const p of parts){let ev='message',data='';
+      for(const line of p.split('\n')){if(line.startsWith('event:'))ev=line.slice(6).trim();
+        else if(line.startsWith('data:'))data+=line.slice(5).trim();}
+      if(data){try{handlers(ev,JSON.parse(data));}catch(e){}}}}
+}
+
+$('go').onclick=async()=>{
+  const msg=$('msg').value.trim();if(!msg)return;
+  $('go').disabled=true;$('verify').disabled=true;
+  $('ans').innerHTML='';$('reason').innerHTML='';$('log').innerHTML='';$('verdict').className='verdict';
+  ent.length=risk.length=corr.length=flags.length=0;drawChart();
+  let lastAnswer='';
+  await stream('/api/generate',{message:msg,temperature:parseFloat($('temp').value)},(ev,d)=>{
+    if(ev==='start'){
+      $('wEntv').textContent=d.weights.entropy_bar.toFixed(2);$('wEnt').style.width=(d.weights.entropy_bar/2*100)+'%';
+      $('wMarv').textContent=d.weights.margin_bar.toFixed(2);$('wMar').style.width=(d.weights.margin_bar*100)+'%';
+      $('wTauv').textContent=d.gate.tau.toFixed(2);$('wTau').style.width=(d.gate.tau*100)+'%';
+      addLog('▶ start · '+d.model);
+    }else if(ev==='reason'){
+      const s=document.createElement('span');s.className='rt';s.textContent=d.token;$('reason').appendChild(s);
+    }else if(ev==='token'){
+      lastAnswer+=d.token;
+      const s=document.createElement('span');s.className='tok'+(d.is_fact?' fact':'')+(d.flagged?' flag':'');
+      s.style.color=entColor(d.entropy,d.is_fact,d.flagged);s.textContent=d.token;
+      s.title=`H=${d.entropy} margin=${d.margin}`+(d.alts?' alts:'+d.alts.join('|'):'');
+      $('ans').appendChild(s);$('ans').scrollTop=$('ans').scrollHeight;
+      ent.push(d.entropy);risk.push(d.risk);corr.push(d.corruption);flags.push(d.flagged);drawChart();
+      $('mFact').textContent=d.fact_uncertainty.toFixed(2);$('mCorr').textContent=d.corruption.toFixed(2);
+      $('mRisk').textContent=d.risk.toFixed(2);
+      if(d.flagged)addLog(`⚑ fact "${d.token.trim()}" H=${d.entropy} margin=${d.margin} → uncertain`,'a');
+    }else if(ev==='final'){
+      $('mFlag').textContent=(d.flagged_fact_tokens||0)+'/'+(d.fact_tokens||0);
+      const dec=d.decision;const v=$('verdict');v.className='verdict '+dec;
+      const txt={confident:'✓ CONFIDENT — the model is decisive on its facts (risk '+d.risk+')',
+        hedge:'~ HEDGE — some fact uncertainty, present with caveats (risk '+d.risk+')',
+        abstain:'⚠ ABSTAIN — do not trust these figures (risk '+d.risk+')'+(d.reasons&&d.reasons.length?' · '+d.reasons.join('; '):''),
+        error:'error'}[dec]||dec;
+      v.textContent=txt;
+      addLog(`■ final · decision=${dec} risk=${d.risk} flagged=${d.flagged_fact_tokens}/${d.fact_tokens}`,
+        dec==='confident'?'g':(dec==='abstain'?'f':'a'));
+      window._last={question:msg,answer:lastAnswer};$('verify').disabled=false;$('go').disabled=false;
+    }else if(ev==='error'){addLog('✖ '+d.message,'f');$('go').disabled=false;}
+  });
+};
+
+$('verify').onclick=async()=>{
+  if(!window._last)return;$('verify').disabled=true;
+  addLog('▶ deep verify (L3 semantic entropy + L4 targeted CoVe)…');
+  await stream('/api/verify',{message:window._last.question,claim:window._last.answer},(ev,d)=>{
+    if(ev==='semantic')addLog(`semantic entropy=${d.semantic_entropy} normalized=${d.normalized} · ${d.n_clusters} meaning clusters / ${d.n_samples} samples · agreement=${d.agreement}`,d.normalized>0.5?'a':'g');
+    else if(ev==='verify')addLog(`verify verdict=${d.verdict} · independent: "${d.independent}"`,d.verdict==='supported'?'g':'f');
+    else if(ev==='verify_final'){addLog(`■ deep-verify risk=${d.risk} → ${d.decision}`,d.decision==='confident'?'g':'f');
+      const v=$('verdict');v.className='verdict '+d.decision;
+      v.textContent=(v.textContent||'')+'  |  deep-verify: '+d.decision+' (risk '+d.risk+')';}
+    else if(ev==='error')addLog('✖ '+d.message,'f');
+  });
+  $('verify').disabled=false;
+};
+</script>
+</body></html>
