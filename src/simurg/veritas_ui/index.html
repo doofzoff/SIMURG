@@ -87,6 +87,9 @@ svg{display:block;width:100%}
 .mini{font-size:10px;color:var(--dim)} .kv{font-family:var(--mono);font-size:11px;color:var(--sub)} .kv b{color:var(--ink)}
 input[type=range]{accent-color:var(--brand)}
 @media(max-width:1200px){.grid{grid-template-columns:1fr}}
+.sbar{position:sticky;bottom:0;display:flex;align-items:center;gap:22px;padding:5px 16px;background:linear-gradient(0deg,#0b0e13,#0d1016);
+border-top:1px solid var(--line2);font-family:var(--mono);font-size:10.5px;color:var(--sub);letter-spacing:.3px;z-index:5}
+.sbar b{color:var(--ink)} .sbar .sp{flex:1}
 </style></head>
 <body>
 <div class="hdr">
@@ -161,6 +164,11 @@ input[type=range]{accent-color:var(--brand)}
       </div>
     </div>
 
+    <div class="panel"><h3>contribution heatmap · feature × token <span class="r">blue +corrupt · red protective</span></h3>
+      <div style="padding:6px 10px 10px"><svg id="heat" viewBox="0 0 800 150" preserveAspectRatio="none" style="height:150px"></svg>
+      <div id="heatLabels" class="mini" style="display:flex;flex-direction:column;gap:0;position:absolute"></div></div>
+    </div>
+
     <div class="panel"><h3>next-token distribution (current fact token) <span class="r" id="distTok">—</span></h3>
       <div class="body dist" id="dist"><div class="mini">the model's own top-k over the next token. one bar dominating = confident recall;
       spread out = the decoder is torn → epistemic uncertainty.</div></div>
@@ -183,9 +191,19 @@ input[type=range]{accent-color:var(--brand)}
   </div>
 </div>
 
+<div class="sbar">
+  <span>SIMURG VERITAS v1.0.2</span>
+  <span>endpoint <b id="sbEp">10.10.70.14:8991</b></span>
+  <span>layers <b>L0 corruption · L2 fact-entropy · L3 semantic · L4 verify · L5 abstain</b></span>
+  <span class="sp"></span>
+  <span>state <b id="sbState" style="color:var(--sub)">idle</b></span>
+  <span>risk <b id="sbRisk" class="tabnum">0.00</b></span>
+  <span>latency <b id="sbLat" class="tabnum">0.0s</b></span>
+</div>
+
 <script>
 const $=id=>document.getElementById(id);
-const S={ent:[],risk:[],corr:[],fact:[],flags:[],names:[],weights:[],bias:0,info:{},tps0:0,ntok:0};
+const S={ent:[],risk:[],corr:[],fact:[],flags:[],names:[],weights:[],bias:0,info:{},tps0:0,ntok:0,lastDriver:-1,hist:[]};
 $('temp').oninput=e=>$('tempv').textContent=e.target.value;
 $('reasonToggle').onclick=()=>{$('reason').classList.toggle('open');
   $('reasonToggle').textContent=($('reason').classList.contains('open')?'▾':'▸')+' reasoning';};
@@ -236,6 +254,16 @@ function updateWeights(feats,contrib,learned_p,zsum){
   $('wSum').textContent=`z=${zsum.toFixed(2)} → p=${learned_p.toFixed(2)}`;
   return driver;
 }
+function pushHeat(contrib){S.hist.push(contrib);if(S.hist.length>80)S.hist.shift();renderHeat();}
+function renderHeat(){
+  const svg=$('heat');if(!S.names.length||!S.hist.length){svg.innerHTML='';return;}
+  const nf=S.names.length,nt=S.hist.length,W=800,H=150,cw=W/Math.max(nt,1),rh=H/nf;
+  let rects='';
+  for(let c=0;c<nt;c++){const col=S.hist[c];for(let r=0;r<nf;r++){const v=col[r]||0;
+    const a=Math.min(Math.abs(v)/2.5,1);const color=v>=0?`rgba(63,142,240,${a.toFixed(2)})`:`rgba(239,91,91,${a.toFixed(2)})`;
+    rects+=`<rect x="${(c*cw).toFixed(1)}" y="${(r*rh).toFixed(1)}" width="${cw.toFixed(1)}" height="${rh.toFixed(1)}" fill="${color}"/>`;}}
+  svg.innerHTML=rects;
+}
 function distView(tok,dist){
   const el=$('dist');$('distTok').textContent=tok?('"'+tok.trim()+'"'):'—';
   if(!dist||!dist.length){el.innerHTML='<div class="mini">— no fact token yet —</div>';return;}
@@ -268,7 +296,8 @@ $('go').onclick=async()=>{
   $('go').disabled=$('verify').disabled=true;$('hLive').style.display='inline';
   $('ans').innerHTML='';$('reason').innerHTML='';$('feed').innerHTML='';$('ledbody').innerHTML='';
   $('verdict').className='verdict';lastAns='';S.ntok=0;S.tps0=Date.now();
-  ['ent','risk','corr','fact','flags'].forEach(k=>S[k].length=0);chart();
+  ['ent','risk','corr','fact','flags','hist'].forEach(k=>S[k].length=0);S.lastDriver=-1;chart();renderHeat();
+  $('sbState').textContent='generating';$('sbState').style.color='var(--amber)';
   await stream('/api/generate',{message:msg,temperature:parseFloat($('temp').value)},(ev,d)=>{
     if(ev==='start'){
       S.names=d.learned.names;S.weights=d.learned.weights;S.bias=d.learned.bias;S.info=d.learned.info;S.tau=d.gate.tau;
@@ -285,6 +314,7 @@ $('go').onclick=async()=>{
       $('mRisk').textContent=fmt(d.risk);$('mFact').textContent=fmt(d.fact_uncertainty);
       $('mCorr').textContent=fmt(d.corruption);$('mLearn').textContent=fmt(d.learned_p);
       $('mEnt').textContent=fmt(d.entropy);$('mMar').textContent=fmt(d.margin,1);
+      $('sbRisk').textContent=fmt(d.risk);$('sbLat').textContent=(d.elapsed||0)+'s';
       const zsum=d.contrib.reduce((a,b)=>a+b,0)+S.bias;
       const drv=updateWeights(d.features,d.contrib,d.learned_p,zsum);
       riskDecomp(d.risk_terms||{},d.risk,S.tau||0.5);
@@ -297,11 +327,13 @@ $('go').onclick=async()=>{
       // explanations
       if(d.flagged){const alts=(d.alts||[]).slice(0,3).join(' | ');
         feed(`⚑ fact "<b>${(d.token||'').trim()}</b>" flagged — H=${d.entropy} ${d.entropy>=1.2?'> bar 1.20':''} margin=${d.margin} ${d.margin<=0.6?'< bar 0.60':''} → model torn between [${alts}] → epistemic uncertainty → fact_uncertainty ${fmt(d.fact_uncertainty)}`,'flag');}
-      if(drv.i>=0&&Math.abs(drv.c)>0.9){const nm=S.names[drv.i];const inf=S.info[nm]||['',''];
-        feed(`weight driver: <b>${nm}</b> value=${d.features[drv.i]} × w=${S.weights[drv.i].toFixed(2)} = ${drv.c.toFixed(2)} → ${drv.c>0?'pushes corruption ↑':'protective ↓'} (${inf[1]})`);}
+      pushHeat(d.contrib);
+      if(drv.i>=0&&Math.abs(drv.c)>0.9&&drv.i!==S.lastDriver){S.lastDriver=drv.i;const nm=S.names[drv.i];const inf=S.info[nm]||['',''];
+        feed(`weight driver → <b>${nm}</b> ${d.features[drv.i]} × ${S.weights[drv.i].toFixed(2)} = ${drv.c.toFixed(2)} · ${drv.c>0?'corruption ↑':'protective ↓'} <span class="mini">(${inf[1]})</span>`);}
     }else if(ev==='final'){
       $('hLive').style.display='none';$('mFlag').textContent=(d.flagged_fact_tokens||0)+'/'+(d.fact_tokens||0);
       const dec=d.decision;$('mDec').textContent=dec.toUpperCase();$('mDec').className='v '+(dec==='confident'?'g':dec==='hedge'?'a':'r');
+      $('sbState').textContent=dec;$('sbState').style.color=(dec==='confident'?'var(--green)':dec==='hedge'?'var(--amber)':'var(--red)');
       const v=$('verdict');v.className='verdict '+dec;
       const txt={confident:`✓ CONFIDENT · risk ${d.risk} < τ ${d.tau} · the model is decisive on every fact`,
         hedge:`~ HEDGE · risk ${d.risk} near τ ${d.tau} · present figures with caveats`,
