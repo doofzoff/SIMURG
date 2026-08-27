@@ -341,7 +341,19 @@ $('go').onclick=async()=>{
         error:'error'}[dec]||dec;v.textContent=txt;
       feed(`■ verdict = <b>${dec.toUpperCase()}</b> · risk=${d.risk} · flagged ${d.flagged_fact_tokens}/${d.fact_tokens} facts · ${d.elapsed}s`,dec==='confident'?'good':(dec==='abstain'?'abstain':'flag'));
       window._last={question:msg,answer:lastAns};$('verify').disabled=false;$('go').disabled=false;
-    }else if(ev==='error'){feed('✖ '+d.message,'abstain');$('go').disabled=false;$('hLive').style.display='none';}
+    }else if(ev==='auto_start'){$('sbState').textContent='self-consistency…';$('sbState').style.color='var(--amber)';
+      feed('▶ auto L3 self-consistency — '+d.note+' (resampling the model…)','flag');}
+    else if(ev==='revised'){
+      const dec=d.decision;const v=$('verdict');$('mDec').textContent=dec.toUpperCase();
+      $('mDec').className='v '+(dec==='confident'?'g':dec==='hedge'?'a':'r');
+      $('sbState').textContent=dec;$('sbState').style.color=(dec==='confident'?'var(--green)':dec==='hedge'?'var(--amber)':'var(--red)');
+      const why=`self-consistency: semantic entropy ${d.semantic_entropy} (${d.n_clusters} meaning clusters, agreement ${d.agreement})`+(d.no_record_rate>0?`, ${Math.round(d.no_record_rate*100)}% of resamples found NO RECORD`:'');
+      if(dec!=='confident'){v.className='verdict '+dec;
+        v.textContent=(dec==='abstain'?'⚠ ABSTAIN (revised) — this looks FABRICATED · ':'~ HEDGE (revised) · ')+why;
+        feed(`■ VERDICT REVISED → <b>${dec.toUpperCase()}</b> · ${why}`,'abstain');}
+      else{feed(`■ self-consistency confirms CONFIDENT · ${why}`,'good');}}
+    else if(ev==='auto_error'){feed('auto-verify error: '+d.message,'flag');}
+    else if(ev==='error'){feed('✖ '+d.message,'abstain');$('go').disabled=false;$('hLive').style.display='none';}
   });
 };
 

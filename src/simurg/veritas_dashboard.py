@@ -27,6 +27,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib import request as urlrequest
 
 import math
+import re
+from concurrent.futures import ThreadPoolExecutor
 
 from .detection.sentinel import Simurg
 from .features import StreamFeatures
@@ -137,6 +139,57 @@ def _ask(url: str, model: str, prompt: str, temperature=0.4, max_tokens=200) -> 
         return f"(error: {e})"
 
 
+# events / claims worth an automatic self-consistency check
+_CHECKWORTHY = re.compile(r"\b(19|20)\d\d\b|\b\d{1,3}([.,]\d+)?\s?(%|percent|people|million|billion)|"
+                          r"\bon\s+\w+\s+\d{1,2}\b|\b\d{1,2}\s+\w+\s+(19|20)\d\d\b")
+_NORECORD = re.compile(r"no record|does not exist|no evidence|not aware|couldn'?t find|"
+                       r"unable to (find|verify)|fictional|no (verifiable|documented|such)|"
+                       r"i (do not|don'?t) have|there is no|no information|\bNONE\b", re.I)
+
+
+VERIFIER_URL = os.environ.get("VERITAS_VERIFIER_URL", "http://10.10.70.14:8004/v1/chat/completions")
+VERIFIER_MODEL = os.environ.get("VERITAS_VERIFIER_MODEL", "wahoo-1.5-preview")
+
+
+def _auto_l3(url, model, question, answer, n=5):
+    """Confident fabrications are invisible to single-generation logprobs, so we
+    catch them by SELF-CONSISTENCY: re-ask the same fact n× in parallel. A model
+    that knows repeats one answer (low semantic entropy); a fabricating model
+    scatters, and usually admits 'no record' when resampled. Runs on a fast
+    verifier model (configurable) so it stays responsive even when the main model
+    is a slow reasoner. Empty/too-short samples are dropped — they must NEVER be
+    read as agreement."""
+    probe = ("Answer ONLY with the single specific fact (a date / number / name). "
+             "If no such thing verifiably exists or you are not sure, reply exactly "
+             "'NONE'. Do not explain.\n\n" + question)
+
+    def one(_):
+        return _ask(VERIFIER_URL, VERIFIER_MODEL, probe, temperature=1.0, max_tokens=2500)
+    with ThreadPoolExecutor(max_workers=n) as ex:
+        raw = list(ex.map(one, range(n)))
+    answers = [a for a in raw if a and len(a.strip()) >= 2 and not a.startswith("(error")]
+    no_rec = sum(1 for a in answers if _NORECORD.search(a or ""))
+    no_rec_rate = no_rec / max(1, len(answers))
+    if len(answers) < 2:
+        return {"normalized": 1.0, "semantic_entropy": 0.0, "n_clusters": 0,
+                "agreement": 0.0, "no_record_rate": round(no_rec_rate, 2),
+                "decision": "hedge", "inconclusive": True,
+                "samples": [(a or "")[:160] for a in raw]}
+    se = semantic_entropy(lambda it=iter(answers): next(it), n=len(answers))
+    norm = se["normalized"]
+    if no_rec_rate >= 0.34 or norm >= 0.35:
+        decision = "abstain"
+    elif norm >= 0.18:
+        decision = "hedge"
+    else:
+        decision = "confident"
+    return {"normalized": norm, "semantic_entropy": se["semantic_entropy"],
+            "n_clusters": se["n_clusters"], "agreement": se["agreement"],
+            "no_record_rate": round(no_rec_rate, 2), "decision": decision,
+            "verifier": VERIFIER_MODEL,
+            "samples": [(a or "")[:160] for a in answers]}
+
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):
         pass
@@ -198,6 +251,7 @@ class Handler(BaseHTTPRequestHandler):
         self._sse_open()
         t0 = time.time()
         answer_chars = 0
+        answer_text = ""
         names = list(StreamFeatures.VECTOR)
         weights = [round(float(w), 3) for w in (_LEARNED.w if _LEARNED is not None else [0]*len(names))]
         bias = round(float(_LEARNED.b), 3) if _LEARNED is not None else 0.0
@@ -224,6 +278,7 @@ class Handler(BaseHTTPRequestHandler):
                     continue
                 sig = guard.feed(tok, tops)
                 answer_chars += len(tok)
+                answer_text += tok
                 sig["elapsed"] = round(time.time() - t0, 1)
                 # ── live decomposition: feature vector, per-feature contribution,
                 #    learned-tier prob, and the top-k next-token distribution ──
@@ -248,6 +303,18 @@ class Handler(BaseHTTPRequestHandler):
             final["elapsed"] = round(time.time() - t0, 1)
             final["answer_chars"] = answer_chars
             emit("final", final)
+            # ── auto self-consistency (L3): the ONLY way to catch a CONFIDENT
+            #    fabrication, which single-generation logprobs cannot see ──
+            auto = bool(b.get("auto_verify", True))
+            if auto and not final.get("aborted") and answer_text.strip() \
+                    and _CHECKWORTHY.search(answer_text):
+                emit("auto_start", {"note": "answer asserts a specific fact — verifying by self-consistency"})
+                try:
+                    av = _auto_l3(url, model, msg, answer_text)
+                    av["elapsed"] = round(time.time() - t0, 1)
+                    emit("revised", av)
+                except Exception as e:
+                    emit("auto_error", {"message": str(e)[:160]})
         except Exception as e:
             emit("error", {"message": f"{type(e).__name__}: {e}"})
             emit("final", {"decision": "error", "risk": 0, "reasons": [str(e)[:160]]})
