@@ -347,11 +347,12 @@ $('go').onclick=async()=>{
       const dec=d.decision;const v=$('verdict');$('mDec').textContent=dec.toUpperCase();
       $('mDec').className='v '+(dec==='confident'?'g':dec==='hedge'?'a':'r');
       $('sbState').textContent=dec;$('sbState').style.color=(dec==='confident'?'var(--green)':dec==='hedge'?'var(--amber)':'var(--red)');
-      const why=`self-consistency: semantic entropy ${d.semantic_entropy} (${d.n_clusters} meaning clusters, agreement ${d.agreement})`+(d.no_record_rate>0?`, ${Math.round(d.no_record_rate*100)}% of resamples found NO RECORD`:'');
+      const why=d.inconclusive?`fact-check inconclusive (verifier unavailable)`:
+        `fact-check ${d.n}×: <b>${d.yes} TRUE / ${d.no} FALSE${d.unsure?' / '+d.unsure+' unsure':''}</b> (verifier ${d.verifier})`;
       if(dec!=='confident'){v.className='verdict '+dec;
-        v.textContent=(dec==='abstain'?'⚠ ABSTAIN (revised) — this looks FABRICATED · ':'~ HEDGE (revised) · ')+why;
+        v.textContent=(dec==='abstain'?'⚠ ABSTAIN (revised) — this looks FABRICATED · ':'~ HEDGE (revised) · ')+why.replace(/<\/?b>/g,'');
         feed(`■ VERDICT REVISED → <b>${dec.toUpperCase()}</b> · ${why}`,'abstain');}
-      else{feed(`■ self-consistency confirms CONFIDENT · ${why}`,'good');}}
+      else{feed(`■ fact-check confirms CONFIDENT · ${why}`,'good');}}
     else if(ev==='auto_error'){feed('auto-verify error: '+d.message,'flag');}
     else if(ev==='error'){feed('✖ '+d.message,'abstain');$('go').disabled=false;$('hLive').style.display='none';}
   });

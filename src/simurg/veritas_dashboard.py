@@ -151,43 +151,49 @@ VERIFIER_URL = os.environ.get("VERITAS_VERIFIER_URL", "http://10.10.70.14:8004/v
 VERIFIER_MODEL = os.environ.get("VERITAS_VERIFIER_MODEL", "wahoo-1.5-preview")
 
 
+_VOTE = re.compile(r"\b(YES|NO|UNSURE)\b", re.I)
+
+
 def _auto_l3(url, model, question, answer, n=5):
     """Confident fabrications are invisible to single-generation logprobs, so we
-    catch them by SELF-CONSISTENCY: re-ask the same fact n× in parallel. A model
-    that knows repeats one answer (low semantic entropy); a fabricating model
-    scatters, and usually admits 'no record' when resampled. Runs on a fast
-    verifier model (configurable) so it stays responsive even when the main model
-    is a slow reasoner. Empty/too-short samples are dropped — they must NEVER be
-    read as agreement."""
-    probe = ("Answer ONLY with the single specific fact (a date / number / name). "
-             "If no such thing verifiably exists or you are not sure, reply exactly "
-             "'NONE'. Do not explain.\n\n" + question)
+    fact-CHECK the claim: put the model's own statement to a fast verifier model n
+    times in parallel — "is this accurate AND about a real, verifiable thing?
+    YES / NO / UNSURE". Voting over independent checks is robust for descriptive
+    answers (unlike a single-fact self-consistency probe, which misfires on "what
+    is X" questions). A majority NO ⇒ fabricated ⇒ abstain."""
+    claim = (answer or "").strip().replace("\n", " ")
+    claim = re.sub(r"\s+", " ", claim)[:600]
+    probe = ("You are a strict fact-checker. Is the following statement factually accurate "
+             "AND about a real, verifiable thing (not invented)? Reply with EXACTLY one "
+             "word: YES, NO, or UNSURE. Do not explain.\n\nStatement: " + claim)
 
     def one(_):
-        return _ask(VERIFIER_URL, VERIFIER_MODEL, probe, temperature=1.0, max_tokens=2500)
+        out = _ask(VERIFIER_URL, VERIFIER_MODEL, probe, temperature=0.7, max_tokens=2500)
+        m = _VOTE.search((out or "").upper())
+        return m.group(1).upper() if m else ""
     with ThreadPoolExecutor(max_workers=n) as ex:
-        raw = list(ex.map(one, range(n)))
-    answers = [a for a in raw if a and len(a.strip()) >= 2 and not a.startswith("(error")]
-    no_rec = sum(1 for a in answers if _NORECORD.search(a or ""))
-    no_rec_rate = no_rec / max(1, len(answers))
-    if len(answers) < 2:
-        return {"normalized": 1.0, "semantic_entropy": 0.0, "n_clusters": 0,
-                "agreement": 0.0, "no_record_rate": round(no_rec_rate, 2),
-                "decision": "hedge", "inconclusive": True,
-                "samples": [(a or "")[:160] for a in raw]}
-    se = semantic_entropy(lambda it=iter(answers): next(it), n=len(answers))
-    norm = se["normalized"]
-    if no_rec_rate >= 0.34 or norm >= 0.35:
+        votes = [v for v in ex.map(one, range(n)) if v]
+    if len(votes) < 2:
+        return {"decision": "hedge", "inconclusive": True, "votes": {},
+                "yes": 0, "no": 0, "unsure": 0, "n": len(votes), "verifier": VERIFIER_MODEL}
+    yes = votes.count("YES"); no = votes.count("NO"); unsure = votes.count("UNSURE")
+    m = len(votes)
+    no_rate = no / m; yes_rate = yes / m; unsure_rate = unsure / m
+    # a fast 12B fact-checker is noisy, so require a clear NO-majority to abstain
+    # and let a YES-majority stand as confident (avoid false-abstain on true facts)
+    if no_rate >= 0.6:
         decision = "abstain"
-    elif norm >= 0.18:
-        decision = "hedge"
-    else:
+    elif yes_rate >= 0.6 and no_rate <= 0.4:
         decision = "confident"
-    return {"normalized": norm, "semantic_entropy": se["semantic_entropy"],
-            "n_clusters": se["n_clusters"], "agreement": se["agreement"],
-            "no_record_rate": round(no_rec_rate, 2), "decision": decision,
-            "verifier": VERIFIER_MODEL,
-            "samples": [(a or "")[:160] for a in answers]}
+    else:
+        decision = "hedge"
+    # entropy over the vote distribution (for the UI signal fields)
+    ps = [x / m for x in (yes, no, unsure) if x]
+    H = -sum(p * math.log(p + 1e-12) for p in ps)
+    return {"decision": decision, "verifier": VERIFIER_MODEL,
+            "yes": yes, "no": no, "unsure": unsure, "n": m,
+            "no_rate": round(no_rate, 2), "yes_rate": round(yes_rate, 2),
+            "vote_entropy": round(H, 3), "agreement": round(max(yes, no, unsure) / m, 2)}
 
 
 class Handler(BaseHTTPRequestHandler):
