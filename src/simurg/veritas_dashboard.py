@@ -47,7 +47,7 @@ def _endpoint(url: str) -> str:
 
 
 def _upstream(url: str, model: str, messages: list, *, temperature=0.7,
-              max_tokens=2200, top_logprobs=5, timeout=300):
+              max_tokens=130000, top_logprobs=5, timeout=600):
     """Yield (phase, token_text, top_logprobs) for each streamed token.
     phase is 'reasoning' or 'content'."""
     payload = json.dumps({
