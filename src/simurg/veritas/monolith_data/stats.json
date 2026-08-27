@@ -1,0 +1,25 @@
+{
+ "total": 300,
+ "features": [
+  "n_fact",
+  "mean_entropy",
+  "max_entropy",
+  "high_ent_frac",
+  "mean_margin",
+  "min_margin",
+  "mean_top1",
+  "competing",
+  "corruption",
+  "answer_len"
+ ],
+ "by_lang": {
+  "en": 100,
+  "ru": 100,
+  "az": 100
+ },
+ "pos": 150,
+ "neg": 150,
+ "train": 255,
+ "test": 45,
+ "seed_model": "dragonfly-meganeura-0820"
+}
