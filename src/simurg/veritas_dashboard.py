@@ -178,41 +178,97 @@ def _subject_query(question: str, answer: str = "") -> str:
     return q
 
 
+_MONTHS = ("january february march april may june july august september october "
+           "november december")
+_MON_RE = re.compile(r"\b(" + _MONTHS.replace(" ", "|") + r")\b", re.I)
+
+
 def _wiki_hits(query: str):
     if not query:
-        return None
+        return 0, ""
     url = ("https://en.wikipedia.org/w/api.php?action=query&list=search&format=json"
            "&srlimit=1&srsearch=" + urllib.parse.quote(query))
     try:
-        req = urlrequest.Request(url, headers=_WIKI_UA)
-        with urlrequest.urlopen(req, timeout=8) as resp:
-            d = json.loads(resp.read())
-        info = d["query"]["searchinfo"]
+        with urlrequest.urlopen(urlrequest.Request(url, headers=_WIKI_UA), timeout=8) as r:
+            d = json.loads(r.read())
         top = (d["query"]["search"] or [{}])
-        return int(info.get("totalhits", 0)), (top[0].get("title") if top else "")
+        return int(d["query"]["searchinfo"].get("totalhits", 0)), (top[0].get("title") or "")
     except Exception:
-        return None
+        return 0, ""
+
+
+def _web_snippets(query: str, k: int = 6):
+    """Reliable web retrieval via DuckDuckGo's html endpoint (POST form)."""
+    try:
+        data = urllib.parse.urlencode({"q": query, "kl": "us-en"}).encode()
+        req = urlrequest.Request(
+            "https://html.duckduckgo.com/html/", data=data,
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)",
+                     "Content-Type": "application/x-www-form-urlencoded"})
+        with urlrequest.urlopen(req, timeout=12) as r:
+            t = r.read().decode("utf-8", "ignore")
+        import html as _h
+        snips = re.findall(r'result__snippet[^>]*>(.*?)</a>', t, re.S)[:k]
+        return [re.sub(r"<[^>]+>", "", _h.unescape(s)).strip() for s in snips]
+    except Exception:
+        return []
+
+
+def _month_years(text: str):
+    """Set of (month, year) mentioned — the check-worthy 'when' of a claim."""
+    out = set()
+    for m in _MON_RE.finditer(text or ""):
+        w = text[max(0, m.start() - 15):m.end() + 15]
+        y = re.search(r"\b(19|20)\d\d\b", w)
+        out.add((m.group(1).lower(), y.group(0) if y else "?"))
+    return out
 
 
 def _ground_check(question: str, answer: str):
-    """Existence-ground the subject against Wikipedia. Zero hits ⇒ the thing the
-    user asked about does not exist ⇒ the confident answer is fabricated ⇒ abstain.
-    Reliable and model-independent; catches the confident-hallucination class that
-    logprobs and self-checks cannot."""
+    """Two-level grounding against real evidence, not a model:
+      1. EXISTENCE — does the subject the user asked about exist? (web snippets +
+         Wikipedia). No evidence anywhere ⇒ fabricated subject ⇒ abstain.
+      2. CLAIM VALUE — if the answer asserts a date, does it agree with the
+         evidence? A month/year the evidence contradicts ⇒ wrong detail on a real
+         subject (the hard class) ⇒ abstain, and surface the evidence's value.
+    Catches BOTH the nonexistent-entity and the wrong-detail hallucination."""
     q = _subject_query(question, answer)
-    res = _wiki_hits(q)
-    if res is None:
-        return {"decision": "unknown", "grounded": False, "query": q,
-                "note": "knowledge base unreachable"}
-    hits, title = res
-    if hits == 0:
-        decision = "abstain"
-    elif hits < 5:
-        decision = "hedge"
-    else:
-        decision = "confident"
-    return {"decision": decision, "grounded": True, "query": q, "hits": hits,
-            "top_title": title, "source": "wikipedia"}
+    snippets = _web_snippets(question) or _web_snippets(q)
+    wiki_hits, wiki_title = _wiki_hits(q)
+    evidence = " ".join(snippets)
+    exists = len(snippets) >= 2 or wiki_hits >= 5
+
+    if not snippets and wiki_hits == 0:
+        return {"decision": "abstain", "query": q, "hits": 0, "source": "web+wiki",
+                "reason": "no knowledge-base or web record — subject appears fabricated"}
+
+    a_dates = _month_years(answer)
+    e_dates = _month_years(evidence)
+    if a_dates and e_dates:
+        # match on month (+year when both known)
+        def agree(a, es):
+            for em, ey in es:
+                if a[0] == em and (a[1] == "?" or ey == "?" or a[1] == ey):
+                    return True
+            return False
+        if all(not agree(a, e_dates) for a in a_dates):
+            ev = sorted({f"{m.title()} {y}" for m, y in e_dates})[:3]
+            return {"decision": "abstain", "query": q, "source": "web",
+                    "hits": len(snippets), "top_title": wiki_title,
+                    "reason": "date CONTRADICTS the evidence",
+                    "claim_date": sorted({f"{m.title()} {y}" for m, y in a_dates})[:2],
+                    "evidence_date": ev, "snippet": (snippets[0][:200] if snippets else "")}
+        return {"decision": "confident", "query": q, "source": "web", "hits": len(snippets),
+                "top_title": wiki_title, "reason": "date matches the evidence"}
+
+    # no comparable date claim → existence verdict
+    if exists:
+        return {"decision": "confident", "query": q, "source": "web+wiki",
+                "hits": len(snippets) or wiki_hits, "top_title": wiki_title,
+                "reason": "subject is attested by real sources"}
+    return {"decision": "hedge", "query": q, "source": "web+wiki",
+            "hits": len(snippets) or wiki_hits, "top_title": wiki_title,
+            "reason": "thin evidence — treat with caution"}
 
 
 _VOTE = re.compile(r"\b(YES|NO|UNSURE)\b", re.I)

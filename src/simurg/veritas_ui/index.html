@@ -342,20 +342,22 @@ $('go').onclick=async()=>{
       feed(`■ verdict = <b>${dec.toUpperCase()}</b> · risk=${d.risk} · flagged ${d.flagged_fact_tokens}/${d.fact_tokens} facts · ${d.elapsed}s`,dec==='confident'?'good':(dec==='abstain'?'abstain':'flag'));
       window._last={question:msg,answer:lastAns};$('verify').disabled=false;$('go').disabled=false;
     }else if(ev==='auto_start'){$('sbState').textContent='grounding…';$('sbState').style.color='var(--amber)';
-      feed('▶ grounding the subject against a knowledge base (Wikipedia)…','flag');}
+      feed('▶ grounding the claim against real web + knowledge sources…','flag');}
     else if(ev==='revised'){
-      if(d.decision==='unknown'){feed('grounding skipped — '+(d.note||'knowledge base unreachable'));return;}
+      if(d.decision==='unknown'){feed('grounding skipped — '+(d.note||'unreachable'));return;}
       const dec=d.decision;const v=$('verdict');$('mDec').textContent=dec.toUpperCase();
       $('mDec').className='v '+(dec==='confident'?'g':dec==='hedge'?'a':'r');
       $('sbState').textContent=dec;$('sbState').style.color=(dec==='confident'?'var(--green)':dec==='hedge'?'var(--amber)':'var(--red)');
-      const why=`grounded: <b>${d.hits} Wikipedia results</b> for "${d.query}"`+(d.top_title?` · top: ${d.top_title}`:'');
       if(dec==='abstain'){v.className='verdict abstain';
-        v.textContent=`⚠ ABSTAIN — subject "${d.query}" has NO knowledge-base record → FABRICATED`;
-        feed(`■ VERDICT REVISED → <b>ABSTAIN</b> · ${why} → subject does not exist`,'abstain');}
+        if(d.claim_date){v.textContent=`⚠ ABSTAIN — WRONG DATE: the model said ${d.claim_date.join(', ')} but real sources say ${(d.evidence_date||[]).join(', ')}`;
+          feed(`■ VERDICT REVISED → <b>ABSTAIN</b> · date CONTRADICTS evidence: model=${d.claim_date.join('/')} vs sources=${(d.evidence_date||[]).join('/')}`,'abstain');
+          if(d.snippet)feed('evidence: "'+d.snippet+'"');}
+        else{v.textContent=`⚠ ABSTAIN — "${d.query}" has NO real record → FABRICATED`;
+          feed(`■ VERDICT REVISED → <b>ABSTAIN</b> · ${d.reason} ("${d.query}")`,'abstain');}}
       else if(dec==='hedge'){v.className='verdict hedge';
-        v.textContent=`~ HEDGE — "${d.query}" is obscure (only ${d.hits} records) · treat with caution`;
-        feed(`■ grounded ${why} → obscure, hedge`,'flag');}
-      else{feed(`■ grounded CONFIDENT · ${why} → subject is real`,'good');}}
+        v.textContent=`~ HEDGE — thin evidence for "${d.query}" · treat with caution`;
+        feed(`■ grounded HEDGE · ${d.reason}`,'flag');}
+      else{feed(`■ grounded CONFIDENT · ${d.reason} (${d.hits} sources${d.top_title?', '+d.top_title:''})`,'good');}}
     else if(ev==='auto_error'){feed('auto-verify error: '+d.message,'flag');}
     else if(ev==='error'){feed('✖ '+d.message,'abstain');$('go').disabled=false;$('hLive').style.display='none';}
   });
