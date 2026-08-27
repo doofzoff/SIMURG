@@ -1,0 +1,20 @@
+{
+ "features": [
+  "norm_entropy",
+  "margin_c",
+  "top1_prob",
+  "chosen_prob",
+  "competing_numbers_c",
+  "competing_entities_c"
+ ],
+ "weights": [
+  4.5273,
+  0.622,
+  -0.5281,
+  -0.5281,
+  3.5535,
+  -16.607
+ ],
+ "bias": 0.5342,
+ "auroc": 0.8488
+}

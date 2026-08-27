@@ -1,0 +1,24 @@
+{
+ "total_fact_tokens": 1533,
+ "train": {
+  "n": 1277,
+  "pos": 618,
+  "neg": 659
+ },
+ "test": {
+  "n": 256,
+  "pos": 102,
+  "neg": 154
+ },
+ "by_kind": {
+  "number": 902,
+  "entity": 631
+ },
+ "seed_model": "wahoo-1.5-preview",
+ "confident_fabrication": {
+  "fab_number_tokens": 720,
+  "generated_confidently": 565,
+  "pct_confident": 78.5,
+  "note": "share of fabricated numbers with near-zero token entropy \u2014 invisible to single-generation logprobs (motivates Veritas L3-L5)"
+ }
+}
