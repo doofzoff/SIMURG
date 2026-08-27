@@ -150,6 +150,70 @@ _NORECORD = re.compile(r"no record|does not exist|no evidence|not aware|couldn'?
 VERIFIER_URL = os.environ.get("VERITAS_VERIFIER_URL", "http://10.10.70.14:8004/v1/chat/completions")
 VERIFIER_MODEL = os.environ.get("VERITAS_VERIFIER_MODEL", "wahoo-1.5-preview")
 
+# ── grounded verification (the ONLY reliable catch for CONFIDENT hallucination) ──
+# A model cannot detect its own confident lie — it confirms it. A weak local model
+# verifier false-abstains true facts. The honest fix is EXTERNAL grounding: ask a
+# knowledge base whether the thing the user asked about actually exists. Wikipedia's
+# search hit-count discriminates cleanly: a real subject returns many articles, a
+# fabricated one returns zero.
+import urllib.parse
+
+_QWORDS = set("what when where who whom why how which is was were are am be been being "
+              "the a an of in on at to for and or by with from as if then than that this "
+              "these those it its do does did not no yes give state answer only one single "
+              "specific number date name year percentage exact do refuse hedge approximate "
+              "please tell me about".split())
+_WIKI_UA = {"User-Agent": "SIMURG-Veritas/1.0 (research; farid.a@hal-x.ai)"}
+
+
+def _subject_query(question: str, answer: str = "") -> str:
+    """The subject the user is asking about — question content words, backed up by
+    the answer's leading capitalised entity if the question is thin."""
+    words = [w for w in re.findall(r"[A-Za-z0-9'\-]+", question or "")
+             if w.lower() not in _QWORDS]
+    q = " ".join(words[:6]).strip()
+    if len(q) < 3 and answer:
+        caps = re.findall(r"[A-Z][A-Za-z0-9\-]+(?:\s+[A-Z][A-Za-z0-9\-]+){0,3}", answer)
+        q = (caps[0] if caps else "").strip()
+    return q
+
+
+def _wiki_hits(query: str):
+    if not query:
+        return None
+    url = ("https://en.wikipedia.org/w/api.php?action=query&list=search&format=json"
+           "&srlimit=1&srsearch=" + urllib.parse.quote(query))
+    try:
+        req = urlrequest.Request(url, headers=_WIKI_UA)
+        with urlrequest.urlopen(req, timeout=8) as resp:
+            d = json.loads(resp.read())
+        info = d["query"]["searchinfo"]
+        top = (d["query"]["search"] or [{}])
+        return int(info.get("totalhits", 0)), (top[0].get("title") if top else "")
+    except Exception:
+        return None
+
+
+def _ground_check(question: str, answer: str):
+    """Existence-ground the subject against Wikipedia. Zero hits ⇒ the thing the
+    user asked about does not exist ⇒ the confident answer is fabricated ⇒ abstain.
+    Reliable and model-independent; catches the confident-hallucination class that
+    logprobs and self-checks cannot."""
+    q = _subject_query(question, answer)
+    res = _wiki_hits(q)
+    if res is None:
+        return {"decision": "unknown", "grounded": False, "query": q,
+                "note": "knowledge base unreachable"}
+    hits, title = res
+    if hits == 0:
+        decision = "abstain"
+    elif hits < 5:
+        decision = "hedge"
+    else:
+        decision = "confident"
+    return {"decision": decision, "grounded": True, "query": q, "hits": hits,
+            "top_title": title, "source": "wikipedia"}
+
 
 _VOTE = re.compile(r"\b(YES|NO|UNSURE)\b", re.I)
 
@@ -309,14 +373,16 @@ class Handler(BaseHTTPRequestHandler):
             final["elapsed"] = round(time.time() - t0, 1)
             final["answer_chars"] = answer_chars
             emit("final", final)
-            # ── auto self-consistency (L3): the ONLY way to catch a CONFIDENT
-            #    fabrication, which single-generation logprobs cannot see ──
+            # ── optional grounded fact-check (OFF by default). A model cannot
+            #    detect its OWN confident hallucination (it confirms its own lies),
+            #    and a weak local verifier false-abstains true facts, so we do NOT
+            #    override the verdict automatically. Turn on only with a RELIABLE,
+            #    GROUNDED verifier (web/knowledge). See _ground_check. ──
             auto = bool(b.get("auto_verify", True))
-            if auto and not final.get("aborted") and answer_text.strip() \
-                    and _CHECKWORTHY.search(answer_text):
-                emit("auto_start", {"note": "answer asserts a specific fact — verifying by self-consistency"})
+            if auto and not final.get("aborted") and len(answer_text.strip()) > 15:
+                emit("auto_start", {"note": "grounding the subject against a knowledge base"})
                 try:
-                    av = _auto_l3(url, model, msg, answer_text)
+                    av = _ground_check(msg, answer_text)
                     av["elapsed"] = round(time.time() - t0, 1)
                     emit("revised", av)
                 except Exception as e:

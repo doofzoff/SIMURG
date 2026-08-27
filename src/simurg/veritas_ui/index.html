@@ -341,18 +341,21 @@ $('go').onclick=async()=>{
         error:'error'}[dec]||dec;v.textContent=txt;
       feed(`■ verdict = <b>${dec.toUpperCase()}</b> · risk=${d.risk} · flagged ${d.flagged_fact_tokens}/${d.fact_tokens} facts · ${d.elapsed}s`,dec==='confident'?'good':(dec==='abstain'?'abstain':'flag'));
       window._last={question:msg,answer:lastAns};$('verify').disabled=false;$('go').disabled=false;
-    }else if(ev==='auto_start'){$('sbState').textContent='self-consistency…';$('sbState').style.color='var(--amber)';
-      feed('▶ auto L3 self-consistency — '+d.note+' (resampling the model…)','flag');}
+    }else if(ev==='auto_start'){$('sbState').textContent='grounding…';$('sbState').style.color='var(--amber)';
+      feed('▶ grounding the subject against a knowledge base (Wikipedia)…','flag');}
     else if(ev==='revised'){
+      if(d.decision==='unknown'){feed('grounding skipped — '+(d.note||'knowledge base unreachable'));return;}
       const dec=d.decision;const v=$('verdict');$('mDec').textContent=dec.toUpperCase();
       $('mDec').className='v '+(dec==='confident'?'g':dec==='hedge'?'a':'r');
       $('sbState').textContent=dec;$('sbState').style.color=(dec==='confident'?'var(--green)':dec==='hedge'?'var(--amber)':'var(--red)');
-      const why=d.inconclusive?`fact-check inconclusive (verifier unavailable)`:
-        `fact-check ${d.n}×: <b>${d.yes} TRUE / ${d.no} FALSE${d.unsure?' / '+d.unsure+' unsure':''}</b> (verifier ${d.verifier})`;
-      if(dec!=='confident'){v.className='verdict '+dec;
-        v.textContent=(dec==='abstain'?'⚠ ABSTAIN (revised) — this looks FABRICATED · ':'~ HEDGE (revised) · ')+why.replace(/<\/?b>/g,'');
-        feed(`■ VERDICT REVISED → <b>${dec.toUpperCase()}</b> · ${why}`,'abstain');}
-      else{feed(`■ fact-check confirms CONFIDENT · ${why}`,'good');}}
+      const why=`grounded: <b>${d.hits} Wikipedia results</b> for "${d.query}"`+(d.top_title?` · top: ${d.top_title}`:'');
+      if(dec==='abstain'){v.className='verdict abstain';
+        v.textContent=`⚠ ABSTAIN — subject "${d.query}" has NO knowledge-base record → FABRICATED`;
+        feed(`■ VERDICT REVISED → <b>ABSTAIN</b> · ${why} → subject does not exist`,'abstain');}
+      else if(dec==='hedge'){v.className='verdict hedge';
+        v.textContent=`~ HEDGE — "${d.query}" is obscure (only ${d.hits} records) · treat with caution`;
+        feed(`■ grounded ${why} → obscure, hedge`,'flag');}
+      else{feed(`■ grounded CONFIDENT · ${why} → subject is real`,'good');}}
     else if(ev==='auto_error'){feed('auto-verify error: '+d.message,'flag');}
     else if(ev==='error'){feed('✖ '+d.message,'abstain');$('go').disabled=false;$('hLive').style.display='none';}
   });
