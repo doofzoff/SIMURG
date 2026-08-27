@@ -36,12 +36,15 @@ from .learning.model import OnlineLogReg
 from .veritas import VeritasGuard, semantic_entropy, verify_claim
 from .veritas.abstain import AbstentionGate
 from .veritas.fact_entropy import FactUncertaintyDetector, token_entropy
+from .veritas.monolith import MonolithModel, aggregate, FEATURES as MONO_FEATURES
 
 DEF_URL = os.environ.get("VERITAS_URL", "http://10.10.70.14:8991/v1/chat/completions")
 DEF_MODEL = os.environ.get("VERITAS_MODEL", "dragonfly-meganeura-0820")
 _HERE = os.path.dirname(os.path.abspath(__file__))
 UI = os.path.join(_HERE, "veritas_ui", "index.html")
 _MODEL_PATH = os.path.join(_HERE, "weights", "simurg_model.json")
+_MONO_PATH = os.environ.get("MONOLITH_MODEL", os.path.join(
+    _HERE, "veritas", "monolith_data", "monolith_model.json"))
 # chat-template / reasoning-boundary tokens some models leak into the stream
 _SKIP_TOKENS = {"<|im_end|>", "<|im_start|>", "<think>", "</think>", "<|endoftext|>",
                 "\n</think>", "</think>\n", "<s>", "</s>"}
@@ -74,6 +77,7 @@ def _load_model():
 
 
 _LEARNED = _load_model()
+MONOLITH = MonolithModel.load(_MONO_PATH)   # online hallucination-risk model
 
 
 def _sse(event: str, data: dict) -> bytes:
@@ -346,6 +350,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/api/health":
             return self._send(200, json.dumps({"ok": True, "model": DEF_MODEL}).encode(),
                               "application/json")
+        if self.path == "/api/monolith":
+            st = MONOLITH.state()
+            st["acc_history"] = MONOLITH.acc_history[-80:]
+            st["loss_history"] = MONOLITH.loss_history[-80:]
+            st["weight_history"] = MONOLITH.weight_history[-80:]
+            return self._send(200, json.dumps(st).encode(), "application/json")
         if self.path in ("/", "/index.html"):
             try:
                 with open(UI, "rb") as f:
@@ -359,7 +369,29 @@ class Handler(BaseHTTPRequestHandler):
             return self._generate()
         if self.path == "/api/verify":
             return self._verify()
+        if self.path == "/api/feedback":
+            return self._feedback()
         self._send(404, b"not found", "text/plain")
+
+    def _feedback(self):
+        """One real-time training step from a like (0) / dislike (1) on an answer."""
+        b = self._body()
+        vec = b.get("features") or []
+        label = 1 if int(b.get("label", 0)) else 0   # dislike ⇒ hallucination ⇒ 1
+        if len(vec) != len(MONO_FEATURES):
+            return self._send(400, json.dumps({"error": "features vector required"}).encode(),
+                              "application/json")
+        res = MONOLITH.learn([float(x) for x in vec], label)
+        try:
+            MONOLITH.save(_MONO_PATH)
+        except Exception:
+            pass
+        res["correction"] = (b.get("correction") or "")[:400]
+        res["acc_history"] = MONOLITH.acc_history[-80:]
+        res["loss_history"] = MONOLITH.loss_history[-80:]
+        res["weight_history"] = MONOLITH.weight_history[-80:]
+        res["features"] = list(MONO_FEATURES)
+        self._send(200, json.dumps(res).encode(), "application/json")
 
     # ── live guarded generation ──────────────────────────────────────────────
     def _generate(self):
@@ -378,6 +410,7 @@ class Handler(BaseHTTPRequestHandler):
         t0 = time.time()
         answer_chars = 0
         answer_text = ""
+        fact_rows = []
         names = list(StreamFeatures.VECTOR)
         weights = [round(float(w), 3) for w in (_LEARNED.w if _LEARNED is not None else [0]*len(names))]
         bias = round(float(_LEARNED.b), 3) if _LEARNED is not None else 0.0
@@ -415,6 +448,15 @@ class Handler(BaseHTTPRequestHandler):
                 dist = []
                 for e in (tops or [])[:6]:
                     dist.append({"t": e.get("token", ""), "p": round(math.exp(e.get("logprob", -20.0)), 4)})
+                if sig["is_fact"]:
+                    Hmax = math.log(len(tops)) if len(tops) > 1 else 1.0
+                    comp = sum(1 for a in [t.get("token", "") for t in (tops or [])[:6]
+                                           if math.exp(t.get("logprob", -20.0)) >= 0.03]
+                               if re.search(r"-?\d", a))
+                    fact_rows.append({"norm_entropy": (sig["entropy"] / Hmax) if Hmax else 0.0,
+                                      "margin": sig["margin"],
+                                      "top1_prob": dist[0]["p"] if dist else 0.0,
+                                      "competing_numbers": comp, "competing_entities": 0})
                 sig["features"] = [round(float(v), 3) for v in vec]
                 sig["contrib"] = contrib
                 sig["learned_p"] = round(learned_p, 3)
@@ -428,6 +470,12 @@ class Handler(BaseHTTPRequestHandler):
             final = guard.finalize()
             final["elapsed"] = round(time.time() - t0, 1)
             final["answer_chars"] = answer_chars
+            # ── Monolith online model: predict hallucination risk for this answer,
+            #    and hand the feature vector back so like/dislike can train on it ──
+            mvec = aggregate(fact_rows, corruption=guard.corruption, answer_len=answer_chars)
+            final["monolith_risk"] = round(MONOLITH.predict(mvec), 3)
+            final["mono_features"] = [round(v, 4) for v in mvec]
+            final["mono_state"] = MONOLITH.state()
             emit("final", final)
             # ── optional grounded fact-check (OFF by default). A model cannot
             #    detect its OWN confident hallucination (it confirms its own lies),

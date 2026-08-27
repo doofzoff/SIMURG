@@ -1,12 +1,14 @@
 <!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>SIMURG VERITAS · terminal</title>
+<title>SIMURG MONOLITH · terminal</title>
+<link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
 :root{--bg:#07090d;--p:#0d1016;--p2:#12161f;--p3:#161b26;--line:#1e2430;--line2:#2a3342;
 --ink:#e9edf4;--sub:#7b8698;--dim:#4a5464;--brand:#E72166;--green:#1fbe83;--amber:#e0a020;
---red:#ef5b5b;--blue:#3f8ef0;--violet:#9b8cf0;--cyan:#33c4c4;--mono:ui-monospace,'SF Mono',Menlo,Consolas,monospace;}
+--red:#ef5b5b;--blue:#3f8ef0;--violet:#9b8cf0;--cyan:#33c4c4;--mono:'IBM Plex Mono',ui-monospace,'SF Mono',Menlo,monospace;}
 *{box-sizing:border-box}
-body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.45 -apple-system,Segoe UI,Roboto,Inter,sans-serif}
+body{margin:0;background:var(--bg);color:var(--ink);font:13px/1.5 'IBM Plex Sans',-apple-system,Segoe UI,Roboto,sans-serif}
 .tabnum{font-variant-numeric:tabular-nums;font-family:var(--mono)}
 /* header */
 .hdr{display:flex;align-items:center;gap:16px;padding:8px 16px;background:linear-gradient(180deg,#0d1016,#090b10);
@@ -90,10 +92,28 @@ input[type=range]{accent-color:var(--brand)}
 .sbar{position:sticky;bottom:0;display:flex;align-items:center;gap:22px;padding:5px 16px;background:linear-gradient(0deg,#0b0e13,#0d1016);
 border-top:1px solid var(--line2);font-family:var(--mono);font-size:10.5px;color:var(--sub);letter-spacing:.3px;z-index:5}
 .sbar b{color:var(--ink)} .sbar .sp{flex:1}
+/* feedback + monolith online learning */
+.fb{display:flex;gap:8px;align-items:center;margin-top:10px}
+.fb button{padding:7px 14px;font-size:12px}
+.fb .like{background:var(--green)} .fb .dislike{background:var(--red)}
+.fb .rp{margin-left:auto;font-family:var(--mono);font-size:11px;color:var(--sub)}
+.fb .rp b{color:var(--ink)}
+.correction{margin-top:8px;display:none}
+.correction textarea{min-height:44px}
+.mono .w{display:flex;align-items:center;gap:8px;margin:4px 0;font-size:11px}
+.mono .wl{width:104px;color:var(--sub);font-family:var(--mono)}
+.mono .mbar{flex:1;height:10px;background:#0a0d12;border-radius:3px;position:relative;overflow:hidden}
+.mono .mbar .mid{position:absolute;left:50%;top:0;bottom:0;width:1px;background:var(--line2)}
+.mono .mp{position:absolute;left:50%;top:1px;bottom:1px;background:var(--red);border-radius:2px;transition:width .2s}
+.mono .mn{position:absolute;right:50%;top:1px;bottom:1px;background:var(--green);border-radius:2px;transition:width .2s}
+.mono .mv{width:46px;text-align:right;font-family:var(--mono);color:var(--dim)}
+.riskgauge{height:8px;background:#0a0d12;border-radius:4px;overflow:hidden;margin-top:4px}
+.riskgauge .rf{height:100%;background:linear-gradient(90deg,var(--green),var(--amber),var(--red));width:0;transition:width .3s}
+.spark{width:100%;height:44px;background:#0a0d12;border:1px solid var(--line);border-radius:6px}
 </style></head>
 <body>
 <div class="hdr">
-  <span class="logo">SIMURG <span class="b">VERITAS</span></span>
+  <span class="logo">SIMURG <span class="b">MONOLITH</span></span>
   <span class="tag">faithful-generation terminal</span>
   <span class="spacer"></span>
   <span class="stat">MODEL <b id="hModel">…</b></span>
@@ -121,6 +141,15 @@ border-top:1px solid var(--line2);font-family:var(--mono);font-size:10.5px;color
     <div class="panel"><h3>answer stream</h3><div class="body" style="padding:8px">
       <div class="ans" id="ans"></div>
       <div class="verdict" id="verdict" style="margin-top:8px"></div>
+      <div class="fb">
+        <button class="like" id="btnLike" disabled>👍 correct</button>
+        <button class="dislike" id="btnDislike" disabled>👎 hallucination</button>
+        <span class="rp">Monolith risk <b id="monoRisk">—</b></span>
+      </div>
+      <div class="correction" id="corrBox">
+        <textarea id="corr" placeholder="(optional) write the correct answer — it is logged with the dislike…"></textarea>
+        <div class="rowb"><button id="btnSubmitCorr" class="ghost">submit dislike + train</button></div>
+      </div>
     </div></div>
 
     <div class="panel"><h3>live metrics</h3><div class="body">
@@ -175,8 +204,24 @@ border-top:1px solid var(--line2);font-family:var(--mono);font-size:10.5px;color
     </div>
   </div>
 
-  <!-- ── COLUMN 3: explanation feed + ledger ── -->
+  <!-- ── COLUMN 3: real-time learning + explanation ── -->
   <div class="col">
+    <div class="panel mono"><h3>real-time learning · Monolith <span class="r" id="monoStat">seen 0</span></h3><div class="body">
+      <div class="tiles" style="grid-template-columns:repeat(3,1fr)">
+        <div class="tile"><div class="v" id="mFb" style="color:var(--blue)">0</div><div class="k">feedback</div></div>
+        <div class="tile"><div class="v g" id="mLikes">0</div><div class="k">👍 correct</div></div>
+        <div class="tile"><div class="v r" id="mDis">0</div><div class="k">👎 halluc.</div></div>
+      </div>
+      <div class="kv" style="margin-top:8px">rolling accuracy <b id="mAcc">—</b> · last loss <b id="mLoss">—</b></div>
+      <div style="display:flex;gap:8px;margin-top:6px">
+        <div style="flex:1"><div class="mini">accuracy</div><svg class="spark" id="sparkAcc" viewBox="0 0 200 44" preserveAspectRatio="none"></svg></div>
+        <div style="flex:1"><div class="mini">loss</div><svg class="spark" id="sparkLoss" viewBox="0 0 200 44" preserveAspectRatio="none"></svg></div>
+      </div>
+      <div class="mini" style="margin:9px 0 4px">model weights (live) — red = predicts hallucination · green = predicts truthful</div>
+      <div id="monoWeights"></div>
+      <div class="mini" style="margin-top:8px">every 👍/👎 is one online SGD step — the model adapts in real time (Monolith-style serving=training).</div>
+    </div></div>
+
     <div class="panel"><h3>explanation feed · why <span class="r">live</span></h3>
       <div class="feed" id="feed"></div>
     </div>
@@ -192,7 +237,7 @@ border-top:1px solid var(--line2);font-family:var(--mono);font-size:10.5px;color
 </div>
 
 <div class="sbar">
-  <span>SIMURG VERITAS v1.0.2</span>
+  <span>SIMURG MONOLITH v1.0.2</span>
   <span>endpoint <b id="sbEp">10.10.70.14:8991</b></span>
   <span>layers <b>L0 corruption · L2 fact-entropy · L3 semantic · L4 verify · L5 abstain</b></span>
   <span class="sp"></span>
@@ -209,6 +254,42 @@ $('reasonToggle').onclick=()=>{$('reason').classList.toggle('open');
   $('reasonToggle').textContent=($('reason').classList.contains('open')?'▾':'▸')+' reasoning';};
 setInterval(()=>{const d=new Date();$('hClock').textContent=d.toTimeString().slice(0,8);},1000);
 fetch('/api/health').then(r=>r.json()).then(d=>{$('hModel').textContent=d.model||'model';});
+
+// ── Monolith online-learning panel ──
+const MONO={names:[],acc:[],loss:[]};
+function spark(id,arr,col,max){const svg=$(id);const W=200,H=44,n=Math.max(arr.length,1);
+  if(!arr.length){svg.innerHTML='';return;}
+  const pts=arr.map((v,i)=>[i/(n-1||1)*W, H-2-Math.min(v/(max||1),1)*(H-4)]);
+  svg.innerHTML=`<polyline fill="none" stroke="${col}" stroke-width="1.6" points="${pts.map(p=>p[0].toFixed(1)+','+p[1].toFixed(1)).join(' ')}"/>`;}
+function renderMono(st){
+  if(st.features)MONO.names=st.features;
+  $('monoStat').textContent='seen '+(st.seen||0);
+  $('mFb').textContent=st.seen||0;$('mLikes').textContent=st.likes||0;$('mDis').textContent=st.dislikes||0;
+  if(st.rolling_acc!=null)$('mAcc').textContent=(st.rolling_acc*100).toFixed(0)+'%';
+  // weights bars (red=+halluc, green=-)
+  const wrap=$('monoWeights');const w=st.weights||[];let maxw=0.5;w.forEach(x=>maxw=Math.max(maxw,Math.abs(x)));
+  wrap.innerHTML=MONO.names.map((nm,i)=>{const val=w[i]||0;const pct=Math.min(Math.abs(val)/maxw,1)*50;
+    return `<div class="w"><span class="wl">${nm}</span><span class="mbar"><span class="mid"></span>
+      <span class="mp" style="width:${val>0?pct:0}%"></span><span class="mn" style="width:${val<0?pct:0}%"></span></span>
+      <span class="mv">${val>=0?'+':''}${val.toFixed(2)}</span></div>`;}).join('');
+}
+async function sendFeedback(label,correction){
+  if(!window._mono)return;
+  const r=await fetch('/api/feedback',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({features:window._mono.features,label:label,correction:correction||''})});
+  const d=await r.json();if(d.error){feed('feedback error: '+d.error,'flag');return;}
+  if(d.features)MONO.names=d.features;MONO.acc=d.acc_history||MONO.acc;MONO.loss=d.loss_history||MONO.loss;
+  renderMono({features:MONO.names,seen:d.seen,likes:d.likes,dislikes:d.dislikes,rolling_acc:d.rolling_acc,weights:d.weights});
+  $('mLoss').textContent=(d.loss!=null?d.loss.toFixed(3):'—');
+  spark('sparkAcc',MONO.acc,'var(--green)',1);spark('sparkLoss',MONO.loss,'var(--amber)',Math.max(...MONO.loss,0.5));
+  feed(`🧠 online SGD step — ${label?'👎 hallucination':'👍 correct'} · loss ${d.loss} · rolling acc ${(d.rolling_acc*100).toFixed(0)}% · model ${d.pred_before>=0.5?'flagged':'passed'} it${correction?' · correction logged':''}`,label?'flag':'good');
+  $('btnLike').disabled=$('btnDislike').disabled=true;$('corrBox').style.display='none';
+}
+$('btnLike').onclick=()=>sendFeedback(0,'');
+$('btnDislike').onclick=()=>{$('corrBox').style.display='block';$('corr').focus();};
+$('btnSubmitCorr').onclick=()=>sendFeedback(1,$('corr').value.trim());
+fetch('/api/monolith').then(r=>r.json()).then(st=>{renderMono(st);MONO.acc=st.acc_history||[];MONO.loss=st.loss_history||[];
+  spark('sparkAcc',MONO.acc,'var(--green)',1);spark('sparkLoss',MONO.loss,'var(--amber)',Math.max(...(MONO.loss.length?MONO.loss:[0.5])));}).catch(()=>{});
 
 function fmt(x,n=2){return (x==null?0:x).toFixed(n);}
 function entColor(H,fact,flagged){if(flagged)return 'var(--red)';if(!fact)return 'var(--ink)';
@@ -341,6 +422,10 @@ $('go').onclick=async()=>{
         error:'error'}[dec]||dec;v.textContent=txt;
       feed(`■ verdict = <b>${dec.toUpperCase()}</b> · risk=${d.risk} · flagged ${d.flagged_fact_tokens}/${d.fact_tokens} facts · ${d.elapsed}s`,dec==='confident'?'good':(dec==='abstain'?'abstain':'flag'));
       window._last={question:msg,answer:lastAns};$('verify').disabled=false;$('go').disabled=false;
+      if(d.mono_features){window._mono={features:d.mono_features};
+        $('monoRisk').textContent=(d.monolith_risk!=null?d.monolith_risk.toFixed(2):'—');
+        $('btnLike').disabled=$('btnDislike').disabled=false;$('corrBox').style.display='none';
+        if(d.mono_state)renderMono(d.mono_state);}
     }else if(ev==='auto_start'){$('sbState').textContent='grounding…';$('sbState').style.color='var(--amber)';
       feed('▶ grounding the claim against real web + knowledge sources…','flag');}
     else if(ev==='revised'){
