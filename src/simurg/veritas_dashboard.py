@@ -26,16 +26,52 @@ import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib import request as urlrequest
 
+import math
+
+from .detection.sentinel import Simurg
+from .features import StreamFeatures
+from .learning.model import OnlineLogReg
 from .veritas import VeritasGuard, semantic_entropy, verify_claim
 from .veritas.abstain import AbstentionGate
-from .veritas.fact_entropy import FactUncertaintyDetector
+from .veritas.fact_entropy import FactUncertaintyDetector, token_entropy
 
 DEF_URL = os.environ.get("VERITAS_URL", "http://10.10.70.14:8991/v1/chat/completions")
 DEF_MODEL = os.environ.get("VERITAS_MODEL", "dragonfly-meganeura-0820")
-UI = os.path.join(os.path.dirname(os.path.abspath(__file__)), "veritas_ui", "index.html")
+_HERE = os.path.dirname(os.path.abspath(__file__))
+UI = os.path.join(_HERE, "veritas_ui", "index.html")
+_MODEL_PATH = os.path.join(_HERE, "weights", "simurg_model.json")
 # chat-template / reasoning-boundary tokens some models leak into the stream
 _SKIP_TOKENS = {"<|im_end|>", "<|im_start|>", "<think>", "</think>", "<|endoftext|>",
                 "\n</think>", "</think>\n", "<s>", "</s>"}
+
+# what each SIMURG feature means, and what a high value tells you about the LLM
+FEATURE_INFO = {
+    "digit_frac":         ("digit fraction", "flood of numbers → table-echo / numeric-dump corruption"),
+    "foreign_frac":       ("foreign-script fraction", "answer drifting into another writing system"),
+    "repeat_rate":        ("n-gram repeat rate", "the decoder is looping the same phrase"),
+    "zlib_ratio":         ("compressibility", "LOW → repetitive/low-information text (protective weight)"),
+    "ttr":                ("type-token ratio", "LOW → vocabulary collapse (protective weight)"),
+    "script_switch_rate": ("script-switch rate", "flipping between alphabets mid-stream"),
+    "structural_density": ("structural-artifact density", "#REF!, delimiters, markup leaking in"),
+    "symbol_frac":        ("symbol fraction", "punctuation/symbol overload"),
+    "max_char_run":       ("max char run", "one character repeated (aaaa / ....)"),
+    "space_frac":         ("space fraction", "spacing anomaly"),
+    "surprise_z":         ("n-gram surprise z", "predictive surprise vs the clean prefix"),
+    "surprise_low_frac":  ("low-surprise fraction", "long stretches of near-zero surprise → looping"),
+    "simhash_drift":      ("SimHash drift", "topic fingerprint jumped → regurgitation"),
+    "entropy":            ("char entropy", "LOW → degenerate text (protective weight)"),
+    "max_shingle_count":  ("max shingle count", "a shingle repeated many times → loop"),
+}
+
+
+def _load_model():
+    try:
+        return OnlineLogReg.load(_MODEL_PATH)
+    except Exception:
+        return None
+
+
+_LEARNED = _load_model()
 
 
 def _sse(event: str, data: dict) -> bytes:
@@ -154,6 +190,7 @@ class Handler(BaseHTTPRequestHandler):
         model = b.get("model") or DEF_MODEL
         temp = float(b.get("temperature", 0.7))
         guard = VeritasGuard(
+            sentinel=Simurg(model=_LEARNED),
             fact=FactUncertaintyDetector(
                 entropy_bar=float(b.get("entropy_bar", 1.20)),
                 margin_bar=float(b.get("margin_bar", 0.60))),
@@ -161,26 +198,49 @@ class Handler(BaseHTTPRequestHandler):
         self._sse_open()
         t0 = time.time()
         answer_chars = 0
+        names = list(StreamFeatures.VECTOR)
+        weights = [round(float(w), 3) for w in (_LEARNED.w if _LEARNED is not None else [0]*len(names))]
+        bias = round(float(_LEARNED.b), 3) if _LEARNED is not None else 0.0
 
         def emit(ev, data):
             try:
                 self.wfile.write(_sse(ev, data)); self.wfile.flush()
             except Exception:
                 raise
-        emit("start", {"model": model, "hold": guard.sentinel.HOLD if hasattr(guard.sentinel, "HOLD") else 0,
-                       "weights": _fact_weights(guard),
-                       "gate": {"tau": guard.gate.tau, "w_corruption": guard.gate.w_corruption,
-                                "w_fact": guard.gate.w_fact}})
+        emit("start", {
+            "model": model,
+            "fact": _fact_weights(guard),
+            "gate": {"tau": guard.gate.tau, "w_corruption": guard.gate.w_corruption,
+                     "w_fact": guard.gate.w_fact, "w_semantic": guard.gate.w_semantic,
+                     "w_verify": guard.gate.w_verify},
+            "learned": {"names": names, "weights": weights, "bias": bias,
+                        "info": {k: FEATURE_INFO.get(k, ("", "")) for k in names}},
+        })
         try:
             for phase, tok, tops in _upstream(url, model, [{"role": "user", "content": msg}],
                                               temperature=temp):
                 if phase == "reasoning":
-                    from .veritas.fact_entropy import token_entropy
                     emit("reason", {"token": tok, "entropy": round(token_entropy(tops), 3)})
                     continue
                 sig = guard.feed(tok, tops)
                 answer_chars += len(tok)
                 sig["elapsed"] = round(time.time() - t0, 1)
+                # ── live decomposition: feature vector, per-feature contribution,
+                #    learned-tier prob, and the top-k next-token distribution ──
+                vec = guard.sentinel.f.vector()
+                contrib = [round(weights[i] * float(vec[i]), 3) for i in range(len(names))]
+                zsum = sum(contrib) + bias
+                learned_p = 1.0 / (1.0 + math.exp(-max(-30.0, min(30.0, zsum))))
+                dist = []
+                for e in (tops or [])[:6]:
+                    dist.append({"t": e.get("token", ""), "p": round(math.exp(e.get("logprob", -20.0)), 4)})
+                sig["features"] = [round(float(v), 3) for v in vec]
+                sig["contrib"] = contrib
+                sig["learned_p"] = round(learned_p, 3)
+                sig["dist"] = dist
+                sig["risk_terms"] = {
+                    "corruption": round(guard.gate.w_corruption * sig["corruption"], 3),
+                    "fact": round(guard.gate.w_fact * sig["fact_uncertainty"], 3)}
                 emit("token", sig)
                 if sig["aborted"]:
                     break
