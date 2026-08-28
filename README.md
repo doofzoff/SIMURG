@@ -35,12 +35,13 @@ SIMURG reads 197,000.
 8. [Quick start](#quick-start)
 9. [Teach it your domain and your failure modes](#teach-it-your-domain-and-your-failure-modes)
 10. [Live guard dashboard](#live-guard-dashboard)
-11. [What SIMURG is NOT](#what-simurg-is-not)
-12. [Repository layout](#repository-layout)
-13. [Roadmap](#roadmap)
-14. [FAQ](#faq)
-15. [Citation](#citation)
-16. [License](#license)
+11. [SIMURG Monolith](#simurg-monolith--real-time-learning--grounded-factuality-new-in-102)
+12. [What SIMURG is NOT](#what-simurg-is-not)
+13. [Repository layout](#repository-layout)
+14. [Roadmap](#roadmap)
+15. [FAQ](#faq)
+16. [Citation](#citation)
+17. [License](#license)
 
 </details>
 
@@ -381,6 +382,93 @@ the server is stdlib-only and acts as a CORS-free proxy to your endpoint.
 
 ---
 
+## SIMURG Monolith — real-time learning + grounded factuality (new in 1.0.2)
+
+The base guard watches the *decode*. **SIMURG Monolith** adds the layer that
+watches the *facts* — and, in the spirit of the [Monolith](https://arxiv.org/abs/2209.07663)
+recommender, **keeps learning while it serves**: every 👍 / 👎 a user gives an
+answer is one online SGD step, so the hallucination model adapts in real time,
+with no batch-retrain gap (serving loop == training loop).
+
+![SIMURG Monolith terminal](https://raw.githubusercontent.com/doofzoff/SIMURG/main/figures/monolith.png)
+
+It stacks five layers on top of the base guard:
+
+- **L2 · white-box fact-uncertainty** — reads the decoder's own top-k logprobs on
+  fact-bearing tokens (numbers, entities, dates). A fact the model is *torn* about
+  (high entropy, competing alternatives) is flagged. This is a signal a black-box
+  guard structurally cannot have — you get it because you host the model.
+- **L3 · self-consistency** — resamples a claim and measures semantic entropy.
+- **L4 · grounded verification** — checks the claim against **real evidence**
+  (Wikipedia + web), not against the model itself. It catches BOTH a *fabricated
+  subject* (no record anywhere → abstain) AND a *wrong detail on a real subject*
+  (e.g. the answer's date contradicts the sources → abstain, and it surfaces the
+  correct date). A model cannot detect its own confident lie; external grounding
+  can.
+- **L5 · conformal abstention** — where the answer cannot be trusted, Monolith
+  **abstains instead of asserting**.
+- **Online model** — a small logistic model over the logprob features that
+  predicts per-answer hallucination risk and trains live from your feedback
+  (bootstrapped multilingual EN/RU/AZ, then adapted by real 👍/👎).
+
+### Launch the terminal
+
+```bash
+python3 -m simurg.veritas_dashboard --port 8330 \
+    --url http://your-endpoint:PORT/v1/chat/completions \
+    --model your-model
+# open http://127.0.0.1:8330
+```
+
+The endpoint must return `logprobs` (vLLM, SGLang, TGI, llama.cpp all can). The
+terminal shows, live: the token stream coloured by uncertainty, per-token entropy
+and margin, the learned-tier weight × value contribution, a feature×token
+contribution heatmap, the grounded verdict (confident / hedge / abstain), and a
+**real-time learning panel** where the model's weights, rolling accuracy and loss
+move on every piece of feedback.
+
+### Wire feedback from YOUR platform (serving = training)
+
+If you integrate SIMURG into your own AI product, connect your existing like /
+dislike buttons and the guard learns from real usage:
+
+```python
+from simurg.veritas.monolith import MonolithModel, aggregate
+
+mono = MonolithModel.load("monolith_model.json")   # or MonolithModel() to start fresh
+
+# ── at serving time: featurize the answer's fact tokens, predict risk ──
+vec  = aggregate(fact_rows, corruption=corr, answer_len=len(answer))
+risk = mono.predict(vec)            # 0..1 — surface it as a warning badge
+
+# ── when the user reacts, that is your label — one online SGD step ──
+mono.learn(vec, label=0)            # 👍 correct   → truthful
+mono.learn(vec, label=1)            # 👎 wrong     → hallucination
+mono.save("monolith_model.json")    # persist; it keeps adapting to YOUR traffic
+```
+
+`fact_rows` are the per-fact-token features the guard already computes while
+streaming (entropy, margin, top-1 prob, competing alternatives). The dashboard
+does exactly this over HTTP — see `veritas_dashboard.py` (`/api/feedback`).
+
+### Bootstrap dataset + model
+
+```bash
+# generate the multilingual answer-level dataset from any logprobs endpoint
+SIMURG_GEN_URL=http://your-endpoint/v1/chat/completions SIMURG_GEN_MODEL=your-model \
+    python3 -m simurg.veritas.monolith_data.generate
+python3 -m simurg.veritas.monolith_data.train     # held-out AUROC + saves the model
+```
+
+The shipped bootstrap model was trained on 300 EN/RU/AZ answers (held-out AUROC
+1.0); replace it by training on your own traffic, then let live feedback refine
+it. The token-level **FactPulse** dataset (`simurg/veritas/factpulse/`) documents
+the honest limit that motivates L3–L5: ~78% of fabricated numbers are produced
+*confidently*, so single-generation logprobs alone cannot catch them — grounding
+can.
+
+---
+
 ## What SIMURG is NOT
 
 SIMURG detects **corrupt or degenerate decoding**, not **factual wrongness**. A
@@ -409,6 +497,12 @@ src/simurg/
 ├── training/            live-training run + real-time web dashboard
 ├── guard_dashboard.py   live guard dashboard server (stdlib-only, SSE, sessions)
 ├── guard_ui/            live guard dashboard front-end + recorded sessions
+├── veritas/             SIMURG Monolith: fact-entropy, grounding, abstention,
+│   ├── monolith.py      the online hallucination-risk model (serving = training)
+│   ├── monolith_data/   multilingual bootstrap dataset + trainer + shipped model
+│   └── factpulse/       token-level fabrication dataset (the confident-lie limit)
+├── veritas_dashboard.py Monolith terminal server (stdlib-only, SSE, feedback API)
+├── veritas_ui/          Monolith terminal front-end (real-time learning panel)
 └── weights/             shipped model + conformal thresholds (use as a pair)
 docs/                    TRAINING.md, CUSTOM.md
 examples/                runnable quickstart
