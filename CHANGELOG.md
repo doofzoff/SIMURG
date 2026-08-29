@@ -3,6 +3,25 @@
 All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog.
 
+## [Unreleased]
+
+### Added
+
+- **free web-search layer for agents** (`simurg.websearch`,
+  `python3 -m simurg.websearch "query" [--json] [--ground]`): the TinyFish
+  Search API (free, 30 req/min, $0, no card, structured
+  `{title, snippet, url, site_name}` results) as a drop-in internet for local
+  and small models — re-check a fact on the web before answering, or abstain on
+  `no_record`. `websearch.search()` / `websearch.snippets()` for evidence,
+  `websearch.ground()` for the attested | thin | no_record verdict (TinyFish +
+  keyless Wikipedia cross-check). Opt-in via `TINYFISH_API_KEY`, stdlib-only,
+  zero new dependencies
+- L4 grounded verification (Monolith) now runs on the same web layer: TinyFish
+  first when a key is set, keyless DuckDuckGo scrape as the fallback; the
+  verdict reports its source (`tinyfish+wiki` vs `web+wiki`)
+- hermetic tests for the web layer and grounding wiring (fake Search API
+  server; no network, no key needed in CI)
+
 ## [1.0.2] - 2026-08-28
 
 ### Added

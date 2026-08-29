@@ -159,7 +159,8 @@ VERIFIER_MODEL = os.environ.get("VERITAS_VERIFIER_MODEL", "wahoo-1.5-preview")
 # verifier false-abstains true facts. The honest fix is EXTERNAL grounding: ask a
 # knowledge base whether the thing the user asked about actually exists. Wikipedia's
 # search hit-count discriminates cleanly: a real subject returns many articles, a
-# fabricated one returns zero.
+# fabricated one returns zero. Web evidence: TinyFish Search (free tier, 30 req/min,
+# structured) when TINYFISH_API_KEY is set — otherwise a keyless DuckDuckGo scrape.
 import urllib.parse
 
 _QWORDS = set("what when where who whom why how which is was were are am be been being "
@@ -201,8 +202,8 @@ def _wiki_hits(query: str):
         return 0, ""
 
 
-def _web_snippets(query: str, k: int = 6):
-    """Reliable web retrieval via DuckDuckGo's html endpoint (POST form)."""
+def _ddg_snippets(query: str, k: int = 6):
+    """Keyless fallback web retrieval via DuckDuckGo's html endpoint (POST form)."""
     try:
         data = urllib.parse.urlencode({"q": query, "kl": "us-en"}).encode()
         req = urlrequest.Request(
@@ -216,6 +217,22 @@ def _web_snippets(query: str, k: int = 6):
         return [re.sub(r"<[^>]+>", "", _h.unescape(s)).strip() for s in snips]
     except Exception:
         return []
+
+
+def _web_snippets(query: str, k: int = 6):
+    """L4 web evidence: TinyFish Search first (free, 30 req/min, structured —
+    needs TINYFISH_API_KEY), DuckDuckGo HTML scrape as the keyless fallback.
+    Returns (snippets, source) with source in {'tinyfish', 'ddg', 'none'}."""
+    if os.environ.get("TINYFISH_API_KEY"):
+        try:
+            from .websearch import snippets as _tf_snips
+            sn = _tf_snips(query, k=k)
+            if sn:
+                return sn, "tinyfish"
+        except Exception:
+            pass
+    sn = _ddg_snippets(query, k)
+    return (sn, "ddg") if sn else ([], "none")
 
 
 def _month_years(text: str):
@@ -237,13 +254,16 @@ def _ground_check(question: str, answer: str):
          subject (the hard class) ⇒ abstain, and surface the evidence's value.
     Catches BOTH the nonexistent-entity and the wrong-detail hallucination."""
     q = _subject_query(question, answer)
-    snippets = _web_snippets(question) or _web_snippets(q)
+    snippets, src = _web_snippets(question)
+    if not snippets:
+        snippets, src = _web_snippets(q)
+    web = "tinyfish" if src == "tinyfish" else "web"
     wiki_hits, wiki_title = _wiki_hits(q)
     evidence = " ".join(snippets)
     exists = len(snippets) >= 2 or wiki_hits >= 5
 
     if not snippets and wiki_hits == 0:
-        return {"decision": "abstain", "query": q, "hits": 0, "source": "web+wiki",
+        return {"decision": "abstain", "query": q, "hits": 0, "source": web + "+wiki",
                 "reason": "no knowledge-base or web record — subject appears fabricated"}
 
     a_dates = _month_years(answer)
@@ -257,20 +277,20 @@ def _ground_check(question: str, answer: str):
             return False
         if all(not agree(a, e_dates) for a in a_dates):
             ev = sorted({f"{m.title()} {y}" for m, y in e_dates})[:3]
-            return {"decision": "abstain", "query": q, "source": "web",
+            return {"decision": "abstain", "query": q, "source": web,
                     "hits": len(snippets), "top_title": wiki_title,
                     "reason": "date CONTRADICTS the evidence",
                     "claim_date": sorted({f"{m.title()} {y}" for m, y in a_dates})[:2],
                     "evidence_date": ev, "snippet": (snippets[0][:200] if snippets else "")}
-        return {"decision": "confident", "query": q, "source": "web", "hits": len(snippets),
+        return {"decision": "confident", "query": q, "source": web, "hits": len(snippets),
                 "top_title": wiki_title, "reason": "date matches the evidence"}
 
     # no comparable date claim → existence verdict
     if exists:
-        return {"decision": "confident", "query": q, "source": "web+wiki",
+        return {"decision": "confident", "query": q, "source": web + "+wiki",
                 "hits": len(snippets) or wiki_hits, "top_title": wiki_title,
                 "reason": "subject is attested by real sources"}
-    return {"decision": "hedge", "query": q, "source": "web+wiki",
+    return {"decision": "hedge", "query": q, "source": web + "+wiki",
             "hits": len(snippets) or wiki_hits, "top_title": wiki_title,
             "reason": "thin evidence — treat with caution"}
 

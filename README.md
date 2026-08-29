@@ -35,13 +35,14 @@ SIMURG reads 197,000.
 8. [Quick start](#quick-start)
 9. [Teach it your domain and your failure modes](#teach-it-your-domain-and-your-failure-modes)
 10. [Live guard dashboard](#live-guard-dashboard)
-11. [SIMURG Monolith](#simurg-monolith--real-time-learning--grounded-factuality-new-in-102)
-12. [What SIMURG is NOT](#what-simurg-is-not)
-13. [Repository layout](#repository-layout)
-14. [Roadmap](#roadmap)
-15. [FAQ](#faq)
-16. [Citation](#citation)
-17. [License](#license)
+11. [Free web search for your agents (TinyFish)](#free-web-search-for-your-agents-tinyfish)
+12. [SIMURG Monolith](#simurg-monolith--real-time-learning--grounded-factuality-new-in-102)
+13. [What SIMURG is NOT](#what-simurg-is-not)
+14. [Repository layout](#repository-layout)
+15. [Roadmap](#roadmap)
+16. [FAQ](#faq)
+17. [Citation](#citation)
+18. [License](#license)
 
 </details>
 
@@ -382,6 +383,45 @@ the server is stdlib-only and acts as a CORS-free proxy to your endpoint.
 
 ---
 
+## Free web search for your agents (TinyFish)
+
+SIMURG can be your agent's **free** internet. The [TinyFish](https://www.tinyfish.ai)
+Search API gives every SIMURG install a web-search layer — structured
+`{title, snippet, url, site_name}` results at **30 requests/min, $0, no card,
+no wallet draw** — so a local or small model can **re-check a fact on the web
+before it commits to an answer**: fetch the evidence, feed it into the model's
+context, or let the grounding verdict decide abstention:
+
+```python
+from simurg import websearch
+
+if websearch.available():                       # TINYFISH_API_KEY set?
+    hits  = websearch.search("when was the Y2K bug")
+    check = websearch.ground("Y2K bug")
+    # check["verdict"]: "attested" | "thin" | "no_record"
+    # attested   → subject is echoed in the evidence → feed check["evidence"]
+    #              into the model's context
+    # thin       → weak or generic hits that never mention the subject → caution
+    # no_record  → nothing anywhere → likely fabricated → abstain
+```
+
+Or from any shell / agent pipeline:
+
+```bash
+export TINYFISH_API_KEY=...        # free key: agent.tinyfish.ai/api-keys
+python3 -m simurg.websearch "when was the Y2K bug" --json
+python3 -m simurg.websearch "Y2K bug" --ground    # verdict + evidence
+```
+
+The same engine powers Monolith's L4 grounded verification (below): with a key,
+the web evidence is TinyFish's structured results; without one, a keyless
+DuckDuckGo scrape. `ground()` also cross-checks the keyless Wikipedia hit-count
+and requires the subject itself to be echoed in the evidence (generic "treaty
+of 1874" hits do not attest a "Zorbachian treaty"). Stdlib HTTP only — zero new
+dependencies.
+
+---
+
 ## SIMURG Monolith — real-time learning + grounded factuality (new in 1.0.2)
 
 The base guard watches the *decode*. **SIMURG Monolith** adds the layer that
@@ -400,11 +440,12 @@ It stacks five layers on top of the base guard:
   guard structurally cannot have — you get it because you host the model.
 - **L3 · self-consistency** — resamples a claim and measures semantic entropy.
 - **L4 · grounded verification** — checks the claim against **real evidence**
-  (Wikipedia + web), not against the model itself. It catches BOTH a *fabricated
-  subject* (no record anywhere → abstain) AND a *wrong detail on a real subject*
-  (e.g. the answer's date contradicts the sources → abstain, and it surfaces the
-  correct date). A model cannot detect its own confident lie; external grounding
-  can.
+  (Wikipedia + the free web — TinyFish Search when `TINYFISH_API_KEY` is set,
+  keyless DuckDuckGo otherwise), not against the model itself. It catches BOTH a
+  *fabricated subject* (no record anywhere → abstain) AND a *wrong detail on a
+  real subject* (e.g. the answer's date contradicts the sources → abstain, and it
+  surfaces the correct date). A model cannot detect its own confident lie;
+  external grounding can.
 - **L5 · conformal abstention** — where the answer cannot be trusted, Monolith
   **abstains instead of asserting**.
 - **Online model** — a small logistic model over the logprob features that
@@ -451,6 +492,14 @@ mono.save("monolith_model.json")    # persist; it keeps adapting to YOUR traffic
 streaming (entropy, margin, top-1 prob, competing alternatives). The dashboard
 does exactly this over HTTP — see `veritas_dashboard.py` (`/api/feedback`).
 
+### Free web grounding (TinyFish)
+
+L4's web evidence runs on the same free engine described in
+[Free web search for your agents](#free-web-search-for-your-agents-tinyfish):
+when `TINYFISH_API_KEY` is set, the grounded verdict reports its source as
+`tinyfish+wiki` instead of `web+wiki`; without a key, the keyless DuckDuckGo
+scrape runs exactly as before.
+
 ### Bootstrap dataset + model
 
 ```bash
@@ -488,6 +537,8 @@ SIMURG guards the *delivery*; grounding guards the *content*. Use both.
 src/simurg/
 ├── core.py              taxonomy, detector protocol, registry
 ├── features.py          the single O(1)/char stream-feature pass
+├── websearch.py         free web-search layer for agents (TinyFish) + ground()
+│                        verdict; CLI: python3 -m simurg.websearch "query"
 ├── signals/             the raw estimators: n-gram surprise, Count-Min sketch,
 │                        rolling SimHash, robust-z calibration, Page-Hinkley
 ├── detection/           rules, detectors, conformal fusion, sentinel (protocol)
@@ -506,7 +557,7 @@ src/simurg/
 └── weights/             shipped model + conformal thresholds (use as a pair)
 docs/                    TRAINING.md, CUSTOM.md
 examples/                runnable quickstart
-tests/                   sentinel regressions + end-to-end dashboard tests
+tests/                   sentinel + websearch regressions + dashboard e2e tests
 figures/                 benchmark figures referenced by this README
 paper/                   the full technical report (PDF)
 .github/workflows/       CI: test matrix on 3.10 / 3.12 / 3.13 + build check

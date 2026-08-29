@@ -23,6 +23,7 @@ from .context_reliance import context_grounding
 from .fact_entropy import (FactUncertaintyDetector, TokenSignal, is_fact_token,
                            token_entropy, token_margin)
 from .guard import VeritasGuard
+from ..websearch import search as tinyfish_search, snippets as tinyfish_snippets
 from .semantic_entropy import semantic_entropy
 from .verify import verify_claim
 
