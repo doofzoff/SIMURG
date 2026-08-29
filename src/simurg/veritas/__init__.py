@@ -24,10 +24,12 @@ from .fact_entropy import (FactUncertaintyDetector, TokenSignal, is_fact_token,
                            token_entropy, token_margin)
 from .guard import VeritasGuard
 from .semantic_entropy import semantic_entropy
+from .tinyfish import search as tinyfish_search, snippets as tinyfish_snippets
 from .verify import verify_claim
 
 __all__ = [
     "VeritasGuard", "FactUncertaintyDetector", "TokenSignal", "AbstentionGate",
     "semantic_entropy", "verify_claim", "context_grounding",
     "token_entropy", "token_margin", "is_fact_token",
+    "tinyfish_search", "tinyfish_snippets",
 ]

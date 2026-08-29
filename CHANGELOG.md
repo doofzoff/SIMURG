@@ -3,6 +3,18 @@
 All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog.
 
+## [Unreleased]
+
+### Added
+
+- TinyFish free-web grounding for L4: when `TINYFISH_API_KEY` is set, the
+  grounded fact-check uses TinyFish Search (free, 30 req/min, structured
+  snippets) as the primary web evidence and reports the source in the verdict
+  (`tinyfish+wiki`); the keyless DuckDuckGo scrape remains the fallback
+  (`simurg/veritas/tinyfish.py`, wired in `veritas_dashboard._ground_check`)
+- hermetic tests for the TinyFish client and grounding wiring (fake Search API
+  server; no network, no key needed in CI)
+
 ## [1.0.2] - 2026-08-28
 
 ### Added

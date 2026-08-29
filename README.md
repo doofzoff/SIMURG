@@ -400,11 +400,12 @@ It stacks five layers on top of the base guard:
   guard structurally cannot have — you get it because you host the model.
 - **L3 · self-consistency** — resamples a claim and measures semantic entropy.
 - **L4 · grounded verification** — checks the claim against **real evidence**
-  (Wikipedia + web), not against the model itself. It catches BOTH a *fabricated
-  subject* (no record anywhere → abstain) AND a *wrong detail on a real subject*
-  (e.g. the answer's date contradicts the sources → abstain, and it surfaces the
-  correct date). A model cannot detect its own confident lie; external grounding
-  can.
+  (Wikipedia + the free web — TinyFish Search when `TINYFISH_API_KEY` is set,
+  keyless DuckDuckGo otherwise), not against the model itself. It catches BOTH a
+  *fabricated subject* (no record anywhere → abstain) AND a *wrong detail on a
+  real subject* (e.g. the answer's date contradicts the sources → abstain, and it
+  surfaces the correct date). A model cannot detect its own confident lie;
+  external grounding can.
 - **L5 · conformal abstention** — where the answer cannot be trusted, Monolith
   **abstains instead of asserting**.
 - **Online model** — a small logistic model over the logprob features that
@@ -450,6 +451,21 @@ mono.save("monolith_model.json")    # persist; it keeps adapting to YOUR traffic
 `fact_rows` are the per-fact-token features the guard already computes while
 streaming (entropy, margin, top-1 prob, competing alternatives). The dashboard
 does exactly this over HTTP — see `veritas_dashboard.py` (`/api/feedback`).
+
+### Free web grounding (TinyFish)
+
+The L4 web evidence prefers the [TinyFish](https://www.tinyfish.ai) Search API —
+structured results, and **free**: 30 requests/min, no card, no wallet draw:
+
+```bash
+export TINYFISH_API_KEY=...   # free key at agent.tinyfish.ai/api-keys
+python3 -m simurg.veritas_dashboard --url http://your-endpoint:PORT/v1/chat/completions --model your-model
+# the grounded verdict now reports its source: "tinyfish+wiki" instead of "web+wiki"
+```
+
+No key → the keyless DuckDuckGo scrape runs exactly as before. TinyFish is an
+opt-in evidence source: stdlib HTTP only, zero new dependencies
+(`simurg/veritas/tinyfish.py`).
 
 ### Bootstrap dataset + model
 
