@@ -390,12 +390,17 @@ Search API gives every SIMURG install a web-search layer — structured
 `{title, snippet, url, site_name}` results at **30 requests/min, $0, no card,
 no wallet draw** — so a local or small model can **re-check a fact on the web
 before it commits to an answer**: fetch the evidence, feed it into the model's
-context, or let the grounding verdict decide abstention:
+context, or let the grounding verdict decide abstention. It works **out of the
+box**: the package ships a free-tier TinyFish key (Search is $0 at any wallet
+balance — the key carries no billing relationship), so no setup is needed.
+For dedicated 30 req/min limits set your own free key
+(`export TINYFISH_API_KEY=...`, agent.tinyfish.ai/api-keys), or
+`export TINYFISH_API_KEY=""` to disable web search entirely:
 
 ```python
 from simurg import websearch
 
-if websearch.available():                       # TINYFISH_API_KEY set?
+if websearch.available():                       # True out of the box
     hits  = websearch.search("when was the Y2K bug")
     check = websearch.ground("Y2K bug")
     # check["verdict"]: "attested" | "thin" | "no_record"
@@ -405,10 +410,9 @@ if websearch.available():                       # TINYFISH_API_KEY set?
     # no_record  → nothing anywhere → likely fabricated → abstain
 ```
 
-Or from any shell / agent pipeline:
+Or from any shell / agent pipeline — right after `pip install simurg`:
 
 ```bash
-export TINYFISH_API_KEY=...        # free key: agent.tinyfish.ai/api-keys
 python3 -m simurg.websearch "when was the Y2K bug" --json
 python3 -m simurg.websearch "Y2K bug" --ground    # verdict + evidence
 ```
@@ -496,9 +500,10 @@ does exactly this over HTTP — see `veritas_dashboard.py` (`/api/feedback`).
 
 L4's web evidence runs on the same free engine described in
 [Free web search for your agents](#free-web-search-for-your-agents-tinyfish):
-when `TINYFISH_API_KEY` is set, the grounded verdict reports its source as
-`tinyfish+wiki` instead of `web+wiki`; without a key, the keyless DuckDuckGo
-scrape runs exactly as before.
+with a key resolved (bundled free key by default, or your own
+`TINYFISH_API_KEY`), the grounded verdict reports its source as
+`tinyfish+wiki` instead of `web+wiki`; with web search opted out
+(`TINYFISH_API_KEY=""`), the keyless DuckDuckGo scrape runs exactly as before.
 
 ### Bootstrap dataset + model
 

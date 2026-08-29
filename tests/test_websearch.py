@@ -68,15 +68,25 @@ def tf(monkeypatch):
 
 # ── client unit behaviour ──────────────────────────────────────────────────────
 
-def test_available_reflects_key(monkeypatch):
+def test_available_out_of_the_box(monkeypatch):
+    """A bundled free key ships with the package: web search is on by default."""
     monkeypatch.delenv("TINYFISH_API_KEY", raising=False)
-    assert websearch.available() is False
+    assert websearch.available() is True
     monkeypatch.setenv("TINYFISH_API_KEY", "tf-test-key")
     assert websearch.available() is True
+    monkeypatch.setenv("TINYFISH_API_KEY", "")          # explicit opt-out
+    assert websearch.available() is False
 
 
-def test_no_key_returns_empty_without_network(monkeypatch):
+def test_bundled_key_is_used_out_of_the_box(tf, monkeypatch):
     monkeypatch.delenv("TINYFISH_API_KEY", raising=False)
+    got = search("y2k bug")
+    assert got
+    assert FakeTinyFish.seen_keys == [websearch.DEFAULT_API_KEY]
+
+
+def test_opt_out_returns_empty_without_network(monkeypatch):
+    monkeypatch.setenv("TINYFISH_API_KEY", "")
     monkeypatch.setenv("TINYFISH_SEARCH_URL", "http://127.0.0.1:1")  # unroutable
     assert search("y2k bug") == []
     assert snippets("y2k bug") == []
@@ -185,8 +195,8 @@ def test_ground_thin_when_subject_not_echoed(tf, monkeypatch):
     assert out["hits"] == 2
 
 
-def test_ground_without_key_uses_wiki_only(tf, monkeypatch):
-    monkeypatch.delenv("TINYFISH_API_KEY", raising=False)
+def test_ground_opted_out_uses_wiki_only(tf, monkeypatch):
+    monkeypatch.setenv("TINYFISH_API_KEY", "")
     monkeypatch.setattr(websearch, "wiki_hits", lambda q, timeout=8.0: (30, "Y2K"))
     out = ground("y2k bug", wiki=True)
     assert out["verdict"] == "attested"
@@ -221,11 +231,21 @@ def test_cli_ground_no_wiki(tf):
     assert doc["source"] == "tinyfish"
 
 
-def test_cli_no_key_exit_code_3(monkeypatch):
-    monkeypatch.delenv("TINYFISH_API_KEY", raising=False)
+def test_cli_opted_out_exit_code_3(monkeypatch):
+    monkeypatch.setenv("TINYFISH_API_KEY", "")
     p = _cli(["y2k bug"], {"TINYFISH_API_KEY": ""})
     assert p.returncode == 3
     assert "TINYFISH_API_KEY" in p.stderr
+
+
+def test_cli_works_with_bundled_key(tf, monkeypatch):
+    """No TINYFISH_API_KEY at all: the bundled free key makes the CLI work."""
+    monkeypatch.delenv("TINYFISH_API_KEY", raising=False)
+    p = _cli(["y2k bug", "--json"], {"TINYFISH_SEARCH_URL": os.environ["TINYFISH_SEARCH_URL"]})
+    assert p.returncode == 0
+    doc = json.loads(p.stdout)
+    assert len(doc) == 2
+    assert FakeTinyFish.seen_keys[-1] == websearch.DEFAULT_API_KEY
 
 
 # ── grounding wiring in the veritas dashboard (L4) ─────────────────────────────
@@ -246,8 +266,8 @@ def test_web_snippets_prefers_tinyfish_over_ddg(tf_env, monkeypatch):
     assert snips[0].startswith("Y2K bug overview")
 
 
-def test_web_snippets_keyless_falls_back_to_ddg(monkeypatch):
-    monkeypatch.delenv("TINYFISH_API_KEY", raising=False)
+def test_web_snippets_opted_out_falls_back_to_ddg(monkeypatch):
+    monkeypatch.setenv("TINYFISH_API_KEY", "")
     monkeypatch.setattr(vd, "_ddg_snippets", lambda q, k=6: ["ddg-snippet"])
     snips, src = vd._web_snippets("y2k bug")
     assert (snips, src) == (["ddg-snippet"], "ddg")

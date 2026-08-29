@@ -223,14 +223,15 @@ def _web_snippets(query: str, k: int = 6):
     """L4 web evidence: TinyFish Search first (free, 30 req/min, structured —
     needs TINYFISH_API_KEY), DuckDuckGo HTML scrape as the keyless fallback.
     Returns (snippets, source) with source in {'tinyfish', 'ddg', 'none'}."""
-    if os.environ.get("TINYFISH_API_KEY"):
-        try:
-            from .websearch import snippets as _tf_snips
+    try:
+        from .websearch import available as _tf_available, \
+            snippets as _tf_snips
+        if _tf_available():
             sn = _tf_snips(query, k=k)
             if sn:
                 return sn, "tinyfish"
-        except Exception:
-            pass
+    except Exception:
+        pass
     sn = _ddg_snippets(query, k)
     return (sn, "ddg") if sn else ([], "none")
 

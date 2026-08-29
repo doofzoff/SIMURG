@@ -8,16 +8,22 @@
 # websearch — a FREE internet for your agents, powered by the TinyFish Search
 # API (tinyfish.ai). Search is free on the free tier: 30 requests/min, $0, no
 # card, no wallet draw. This is the layer a local or small model uses to
-# RE-CHECK a fact on the web before it commits to an answer — fetch ranked
+# re-check a fact on the web before it commits to an answer — fetch ranked
 # {title, snippet, url, site_name} results, feed them into the model's context,
 # or let `ground()` decide attested | thin | no_record so the host can abstain
 # instead of asserting. The same engine powers Monolith's L4 grounded
 # verification.
 #
+# Works OUT OF THE BOX: the package ships a free-tier TinyFish key (Search is
+# $0 at any wallet balance — the key carries no billing relationship), so
+# `python3 -m simurg.websearch "query"` runs right after `pip install simurg`.
+# Key resolution: explicit argument > TINYFISH_API_KEY > bundled free key.
+# Set TINYFISH_API_KEY="" to opt out entirely. For dedicated 30 req/min limits
+# use your own free key (agent.tinyfish.ai/api-keys).
+#
 # Stdlib only (urllib): no SDK, no new dependencies — consistent with
-# SIMURG's numpy-only promise. Opt-in via TINYFISH_API_KEY (free at
-# agent.tinyfish.ai/api-keys); without a key `available()` is False and every
-# call degrades to an empty result, never an exception.
+# SIMURG's numpy-only promise. Every call degrades to an empty result, never
+# an exception.
 #
 #     from simurg import websearch
 #     if websearch.available():
@@ -45,6 +51,11 @@ import urllib.request
 DEFAULT_URL = "https://api.search.tinyfish.ai"
 _ENV_URL = "TINYFISH_SEARCH_URL"       # test / self-host override
 _ENV_KEY = "TINYFISH_API_KEY"
+# Bundled free-tier key so web search works out of the box. Search is $0 at
+# any wallet balance (no card, no billing data attached to the tier); it gives
+# every install the 30 req/min free quota. Set TINYFISH_API_KEY to your own
+# free key for dedicated limits, or TINYFISH_API_KEY="" to disable.
+DEFAULT_API_KEY = "sk-tinyfish-hmDpfxdpp_yHNmpUQAI6CxGx2IWHnqjJ"
 _UA = "SIMURG-websearch/1.0 (free-tier agent grounding)"
 _PURPOSE = ("Ground LLM fact-checking: find real-world evidence for this "
             "subject and its key dates")
@@ -52,12 +63,18 @@ _WIKI_UA = {"User-Agent": "SIMURG-websearch/1.0 (research)"}
 
 
 def available() -> bool:
-    """True when a TinyFish key is configured (TINYFISH_API_KEY)."""
-    return bool(os.environ.get(_ENV_KEY, ""))
+    """True when a TinyFish key resolves: explicit arg > TINYFISH_API_KEY >
+    bundled free key. TINYFISH_API_KEY="" opts out."""
+    return bool(_key())
 
 
 def _key(api_key: str | None = None) -> str:
-    return (api_key if api_key is not None else os.environ.get(_ENV_KEY, "")) or ""
+    if api_key is not None:
+        return api_key
+    env = os.environ.get(_ENV_KEY)
+    if env is not None:
+        return env                    # empty string = explicit opt-out
+    return DEFAULT_API_KEY
 
 
 def search(query: str, api_key: str | None = None, k: int = 6,
@@ -155,8 +172,8 @@ def wiki_hits(query: str, timeout: float = 8.0) -> tuple[int, str]:
 def ground(query: str, api_key: str | None = None, k: int = 6, wiki: bool = True,
            timeout: float = 12.0) -> dict:
     """The re-check layer: does this subject have a real-world record?
-    Combines TinyFish web results (needs a key) with the keyless Wikipedia
-    hit-count, then classifies:
+    Combines TinyFish web results (bundled free key by default) with the
+    keyless Wikipedia hit-count, then classifies:
 
       attested   — >=2 web results or >=5 wiki hits, AND the subject itself is
                    echoed in the evidence: real, feed the evidence to the model
@@ -230,9 +247,9 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     results = search(query, k=args.k)
-    if not available() and not results:
-        print("TINYFISH_API_KEY not set — free key: agent.tinyfish.ai/api-keys",
-              file=__import__("sys").stderr)
+    if not results and not available():
+        print("web search is disabled (TINYFISH_API_KEY='') — set a free key: "
+              "agent.tinyfish.ai/api-keys", file=__import__("sys").stderr)
         return 3
     if args.json:
         print(json.dumps(results, indent=2))
