@@ -3,7 +3,10 @@
 All notable changes to this project are documented in this file.
 The format is based on Keep a Changelog.
 
-## [Unreleased]
+## [1.0.3] - 2026-08-29
+
+SIMURG Search — a free, hallucination-fighting web layer for AI agents. Thanks
+to first-time contributor @0xsyntho for the TinyFish integration.
 
 ### Added
 

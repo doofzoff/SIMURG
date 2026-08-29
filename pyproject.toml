@@ -10,7 +10,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "simurg"
-version = "1.0.2"
+version = "1.0.3"
 description = "Zero-leak online detection of LLM decoding corruption in production streams"
 readme = "README.md"
 license = { text = "Apache-2.0" }
